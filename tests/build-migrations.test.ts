@@ -5,18 +5,16 @@
 // (*.sql files + meta/_journal.json) into out/main/migrations, so that the
 // packaged app's first-run migrate() call can find them at the path that
 // resolveMigrationsPath() returns for a packaged build.
-import { describe, it, expect, beforeAll } from 'vitest'
-import { execSync } from 'node:child_process'
+//
+// The build runs once in tests/global-setup.ts; this spec only reads the shared
+// out/ tree. (It used to run its own `electron-vite build` in a beforeAll, which
+// raced with build-output on out/ under vitest's parallel test files.)
+import { describe, it, expect } from 'vitest'
 import { existsSync, readdirSync } from 'node:fs'
 import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-
-beforeAll(() => {
-  // Self-contained: build so this test is independent of CI step ordering.
-  execSync('npx electron-vite build', { cwd: projectRoot, stdio: 'inherit' })
-}, 180_000)
 
 describe('packaged migrations', () => {
   it('emits .sql files into out/main/migrations', () => {

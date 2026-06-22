@@ -12,6 +12,10 @@ export default defineConfig({
     environment: 'node',
     include: ['tests/**/*.test.ts'],
     setupFiles: ['./tests/setup.ts'],
+    // Build the app once before all tests (see tests/global-setup.ts) so the
+    // build-output / build-migrations specs read a shared, stable out/ tree
+    // instead of each running their own electron-vite build (which raced).
+    globalSetup: ['./tests/global-setup.ts'],
     alias: {
       // Stub the Electron runtime for unit tests — only the Node-safe exports
       // needed by tests are provided here; the real Electron APIs run inside the
