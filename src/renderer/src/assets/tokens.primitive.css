@@ -1,0 +1,31 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* Layer 1 — primitives: raw, brand-agnostic values. No component references these directly. */
+:root {
+  /* neutral grey ramp */
+  --p-grey-0: #ffffff;
+  --p-grey-50: #f7f7f8;
+  --p-grey-100: #ededf0;
+  --p-grey-200: #d9d9de;
+  --p-grey-400: #9a9aa3;
+  --p-grey-600: #5c5c66;
+  --p-grey-800: #2b2b31;
+  --p-grey-900: #1a1a1f;
+  --p-grey-1000: #0a0a0a;
+
+  /* neutral default accent (NOT ManGo brand) */
+  --p-accent: #4f7fc1;
+  --p-accent-rgb: 79, 127, 193;
+
+  --p-ok: #3fa45b;
+  --p-warn: #c9962e;
+  --p-danger: #c0493f;
+
+  /* scale */
+  --p-space-1: 4px;
+  --p-space-2: 8px;
+  --p-space-3: 12px;
+  --p-space-4: 16px;
+  --p-radius: 6px;
+  --p-font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --p-font-mono: ui-monospace, 'SF Mono', 'Cascadia Code', Menlo, monospace;
+}

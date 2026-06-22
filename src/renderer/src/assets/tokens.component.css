@@ -1,0 +1,13 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* Layer 3 — component tokens. Color/surface tokens resolve ONLY from semantic
+   tokens (Layer 2), never from primitives, so a theme can rebind them. Scale
+   primitives that are theme-invariant (--p-space-*, --p-radius) may be used
+   directly by components. */
+:root {
+  --button-bg: var(--color-primary);
+  --button-text: var(--color-on-primary);
+  --card-bg: var(--color-surface);
+  --card-border: var(--color-border);
+  --accent-tint: rgba(var(--color-primary-rgb), 0.12);
+  --focus-ring-color: var(--color-primary);
+}

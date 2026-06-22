@@ -1,0 +1,675 @@
+<!doctype html><html lang="en" data-theme="light"><head><meta charset="utf-8">
+<title>ChronosUI - Plan 6 UI mockups</title>
+<style>
+/* Real ChronosUI 3-layer tokens (copied from src for mockup fidelity) */
+:root{
+  --p-grey-0:#fff;--p-grey-50:#f7f7f8;--p-grey-100:#ededf0;--p-grey-200:#d9d9de;--p-grey-400:#9a9aa3;
+  --p-grey-600:#5c5c66;--p-grey-800:#2b2b31;--p-grey-900:#1a1a1f;--p-grey-1000:#0a0a0a;
+  --p-accent:#4f7fc1;--p-accent-rgb:79,127,193;--p-ok:#3fa45b;--p-warn:#c9962e;--p-danger:#c0493f;
+  --p-space-1:4px;--p-space-2:8px;--p-space-3:12px;--p-space-4:16px;--p-radius:6px;
+  --p-font-sans:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+  --p-font-mono:ui-monospace,'SF Mono','Cascadia Code',Menlo,monospace;
+}
+:root,:root[data-theme='light']{
+  --color-bg:var(--p-grey-50);--color-surface:var(--p-grey-0);--color-border:var(--p-grey-200);
+  --color-text:var(--p-grey-900);--color-text-muted:var(--p-grey-600);--color-primary:var(--p-accent);
+  --color-primary-rgb:var(--p-accent-rgb);--color-on-primary:var(--p-grey-0);--color-ok:var(--p-ok);
+  --color-warn:var(--p-warn);--color-danger:var(--p-danger);--color-code-bg:var(--p-grey-100);
+  /* nav follows the theme (decision A) — light mode = white nav */
+  --nav-bg:var(--color-surface);--nav-text:var(--color-text);--nav-muted:var(--color-text-muted);
+  --nav-active-bg:rgba(var(--color-primary-rgb),.12);--nav-active-text:var(--color-primary);--nav-border:var(--color-border);
+}
+:root[data-theme='dark']{
+  --color-bg:var(--p-grey-900);--color-surface:var(--p-grey-800);--color-border:var(--p-grey-600);
+  --color-text:var(--p-grey-50);--color-text-muted:var(--p-grey-400);--color-primary:var(--p-accent);
+  --color-primary-rgb:var(--p-accent-rgb);--color-on-primary:var(--p-grey-0);--color-ok:var(--p-ok);
+  --color-warn:var(--p-warn);--color-danger:var(--p-danger);--color-code-bg:var(--p-grey-1000);
+  /* dark mode keeps a distinct near-black nav (darker than grey-900 bg) for separation */
+  --nav-bg:var(--p-grey-1000);--nav-text:var(--p-grey-50);--nav-muted:var(--p-grey-400);
+  --nav-active-bg:rgba(var(--color-primary-rgb),.18);--nav-active-text:#fff;--nav-border:var(--p-grey-900);
+}
+*{box-sizing:border-box}
+.accent-tint{background:rgba(var(--color-primary-rgb),.12)}
+
+html,body{margin:0;min-height:100%;font-family:var(--p-font-sans);background:var(--color-bg);color:var(--color-text)}
+*{box-sizing:border-box}
+.bar{position:sticky;top:0;z-index:10;display:flex;align-items:center;gap:10px;padding:10px 16px;background:#0a0a0a;color:#fff;border-bottom:1px solid #000}
+.bar .name{font-weight:600;margin-right:8px}
+.tab{border:1px solid #ffffff22;background:#ffffff10;color:#e7e7ea;border-radius:6px;padding:6px 12px;font-size:13px;cursor:pointer}
+.tab.on{background:var(--color-primary);border-color:transparent;color:#fff;font-weight:500}
+.spacer{flex:1}
+.tbtn{border:1px solid #ffffff22;background:#ffffff10;color:#fff;border-radius:6px;padding:6px 12px;font-size:13px;cursor:pointer}
+.stage{padding:18px;display:flex;justify-content:center}
+.screen{display:none}
+.screen.active{display:block;box-shadow:0 6px 24px rgba(0,0,0,.18);border-radius:10px;overflow:hidden}
+.screen.scr-ed.active{min-height:720px}
+/* sched */
+.scr-sched .win{width:1100px;height:720px;display:flex;overflow:hidden;font-size:13px}
+.scr-sched .nav{width:212px;flex:0 0 212px;background:var(--nav-bg);color:var(--nav-text);display:flex;flex-direction:column;padding:var(--p-space-4) 0;border-right:1px solid var(--nav-border)}
+.scr-sched .brand{display:flex;align-items:center;gap:10px;padding:0 var(--p-space-4) var(--p-space-4);font-weight:600;font-size:15px}
+.scr-sched .tile{width:30px;height:30px;border-radius:7px;background:linear-gradient(160deg,#23232c,#0b0b0f);display:grid;place-items:center;flex:0 0 30px}
+.scr-sched .dial{width:22px;height:22px;color:#7299cd}
+.scr-sched .brand small{display:block;font-weight:400;font-size:11px;color:var(--nav-muted)}
+.scr-sched .navsec{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--nav-muted);padding:var(--p-space-3) var(--p-space-4) var(--p-space-1)}
+.scr-sched .navitem{display:flex;align-items:center;gap:10px;padding:8px var(--p-space-4);color:var(--nav-text);border-left:2px solid transparent}
+.scr-sched .navitem.active{background:var(--nav-active-bg);color:var(--nav-active-text);border-left-color:var(--color-primary);font-weight:500}
+.scr-sched .navitem .ic{width:16px;text-align:center;opacity:.9}
+.scr-sched .navitem .cnt{margin-left:auto;font-size:11px;color:var(--nav-muted)}
+.scr-sched .spacer{flex:1}
+.scr-sched .navfoot{padding:var(--p-space-3) var(--p-space-4) 0;border-top:1px solid var(--nav-border);margin-top:var(--p-space-3);display:flex;align-items:center;justify-content:space-between;color:var(--nav-muted);font-size:11px}
+.scr-sched .themebtn{background:var(--color-bg);color:var(--color-text);border:1px solid var(--nav-border);border-radius:var(--p-radius);padding:5px 9px;cursor:pointer}
+.scr-sched .main{flex:1;display:flex;flex-direction:column;min-width:0}
+.scr-sched .topbar{display:flex;align-items:center;gap:10px;padding:var(--p-space-3) var(--p-space-4);border-bottom:1px solid var(--color-border);background:var(--color-surface)}
+.scr-sched .topbar h1{font-size:15px;margin:0;font-weight:600}
+.scr-sched .topbar .sub{color:var(--color-text-muted);font-size:12px}
+.scr-sched .grow{flex:1}
+.scr-sched .btn{border:1px solid var(--color-border);background:var(--color-surface);color:var(--color-text);border-radius:var(--p-radius);padding:6px 12px;font-size:12px;cursor:pointer;display:inline-flex;gap:5px;align-items:center}
+.scr-sched .btn.primary{background:var(--color-primary);color:var(--color-on-primary);border-color:transparent;font-weight:500}
+.scr-sched .btn.on{background:var(--accent-tint,rgba(79,127,193,.12));border-color:var(--color-primary);color:var(--color-primary)}
+.scr-sched .btn.sm{padding:5px 9px;font-size:11.5px}
+.scr-sched .search{flex:0 0 170px;border:1px solid var(--color-border);background:var(--color-bg);border-radius:var(--p-radius);padding:6px 10px;font-size:12px;color:var(--color-text-muted)}
+.scr-sched /* category filter chips */
+.cats{display:flex;align-items:center;gap:7px;padding:9px var(--p-space-4);border-bottom:1px solid var(--color-border);background:var(--color-bg);flex-wrap:wrap}
+.scr-sched .cat{font-size:12px;padding:4px 11px;border-radius:20px;border:1px solid var(--color-border);background:var(--color-surface);color:var(--color-text-muted);cursor:pointer}
+.scr-sched .cat .n{font-size:10px;opacity:.7;margin-left:4px}
+.scr-sched .cat.on{background:var(--color-primary);color:var(--color-on-primary);border-color:transparent;font-weight:500}
+.scr-sched .cats .label{font-size:11px;color:var(--color-text-muted);text-transform:uppercase;letter-spacing:.05em;margin-right:2px}
+.scr-sched .list{flex:1;overflow:auto;padding:var(--p-space-2) var(--p-space-4)}
+.scr-sched .ghead{display:flex;align-items:center;gap:8px;font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--color-text-muted);margin:var(--p-space-3) 4px var(--p-space-2)}
+.scr-sched .ghead .gc{background:var(--color-border);color:var(--color-text-muted);border-radius:20px;font-size:10px;padding:0 7px}
+.scr-sched .row{display:flex;align-items:center;gap:11px;padding:9px var(--p-space-3);background:var(--color-surface);border:1px solid var(--color-border);border-radius:var(--p-radius);margin-bottom:7px}
+.scr-sched .row.sel{outline:2px solid var(--color-primary);outline-offset:-1px}
+.scr-sched .cb{width:16px;height:16px;border-radius:4px;border:1.5px solid var(--color-border);flex:0 0 16px;display:grid;place-items:center;color:#fff;font-size:11px}
+.scr-sched .cb.on{background:var(--color-primary);border-color:var(--color-primary)}
+.scr-sched .st{width:9px;height:9px;border-radius:50%;flex:0 0 9px}
+.scr-sched .st.ok{background:var(--color-ok)}
+.scr-sched .st.fail{background:var(--color-danger)}
+.scr-sched .st.warn{background:var(--color-warn)}
+.scr-sched .st.off{background:var(--p-grey-400)}
+.scr-sched .meta{min-width:0;flex:1}
+.scr-sched .name{font-weight:600;display:flex;align-items:center;gap:8px;font-size:13px}
+.scr-sched .chip{font-size:10px;padding:1px 7px;border-radius:20px;border:1px solid var(--color-border);color:var(--color-text-muted);font-weight:500}
+.scr-sched .chip.wrap{background:var(--accent-tint,rgba(79,127,193,.12));border-color:transparent;color:var(--color-primary)}
+.scr-sched .cmd{font-family:var(--p-font-mono);font-size:11px;color:var(--color-text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px}
+.scr-sched .sched{flex:0 0 150px}
+.scr-sched .sched .h{font-size:12px}
+.scr-sched .sched .raw{font-family:var(--p-font-mono);font-size:10.5px;color:var(--color-text-muted);margin-top:1px}
+.scr-sched .last{flex:0 0 124px;font-size:11.5px;color:var(--color-text-muted);font-variant-numeric:tabular-nums}
+.scr-sched .acts{display:flex;align-items:center;gap:6px;flex:0 0 auto}
+.scr-sched .toggle{width:32px;height:18px;border-radius:20px;background:var(--color-ok);position:relative;cursor:pointer}
+.scr-sched .toggle.off{background:var(--p-grey-400)}
+.scr-sched .toggle::after{content:"";position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:#fff}
+.scr-sched .toggle.off::after{left:auto;right:2px}
+.scr-sched .icbtn{width:28px;height:28px;border-radius:var(--p-radius);border:1px solid var(--color-border);background:var(--color-surface);cursor:pointer;color:var(--color-text-muted)}
+.scr-sched /* generalized batch action bar */
+.batch{display:flex;align-items:center;gap:10px;padding:8px var(--p-space-3);background:var(--accent-tint,rgba(79,127,193,.12));border:1px solid var(--color-primary);border-radius:var(--p-radius);margin:0 0 8px;font-size:12.5px;position:sticky;top:0;z-index:2}
+.scr-sched .batch b{color:var(--color-primary)}
+.scr-sched .batch .vline{width:1px;height:18px;background:var(--color-border)}
+/* running */
+.scr-running .win{width:1100px;height:720px;display:flex;overflow:hidden;font-size:13px}
+.scr-running .nav{width:212px;flex:0 0 212px;background:var(--nav-bg);color:var(--nav-text);display:flex;flex-direction:column;padding:var(--p-space-4) 0;border-right:1px solid var(--nav-border)}
+.scr-running .brand{display:flex;align-items:center;gap:10px;padding:0 var(--p-space-4) var(--p-space-4);font-weight:600;font-size:15px}
+.scr-running .tile{width:30px;height:30px;border-radius:7px;background:linear-gradient(160deg,#23232c,#0b0b0f);display:grid;place-items:center;flex:0 0 30px}
+.scr-running .dial{width:22px;height:22px;color:#7299cd}
+.scr-running .brand small{display:block;font-weight:400;font-size:11px;color:var(--nav-muted)}
+.scr-running .navsec{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--nav-muted);padding:var(--p-space-3) var(--p-space-4) var(--p-space-1)}
+.scr-running .navitem{display:flex;align-items:center;gap:10px;padding:8px var(--p-space-4);color:var(--nav-text);border-left:2px solid transparent}
+.scr-running .navitem.active{background:var(--nav-active-bg);color:var(--nav-active-text);border-left-color:var(--color-primary);font-weight:500}
+.scr-running .navitem .ic{width:16px;text-align:center;opacity:.9}
+.scr-running .navitem .cnt{margin-left:auto;font-size:11px;color:var(--nav-muted)}
+.scr-running .spacer{flex:1}
+.scr-running .navfoot{padding:var(--p-space-3) var(--p-space-4) 0;border-top:1px solid var(--nav-border);margin-top:var(--p-space-3);display:flex;align-items:center;justify-content:space-between;color:var(--nav-muted);font-size:11px}
+.scr-running .themebtn{background:var(--color-bg);color:var(--color-text);border:1px solid var(--nav-border);border-radius:var(--p-radius);padding:5px 9px;cursor:pointer}
+.scr-running .main{flex:1;display:flex;flex-direction:column;min-width:0}
+.scr-running .topbar{display:flex;align-items:center;gap:10px;padding:var(--p-space-3) var(--p-space-4);border-bottom:1px solid var(--color-border);background:var(--color-surface)}
+.scr-running .topbar h1{font-size:15px;margin:0;font-weight:600}
+.scr-running .topbar .sub{color:var(--color-text-muted);font-size:12px}
+.scr-running .grow{flex:1}
+.scr-running .btn{border:1px solid var(--color-border);background:var(--color-surface);color:var(--color-text);border-radius:var(--p-radius);padding:6px 12px;font-size:12px;cursor:pointer;display:inline-flex;gap:5px;align-items:center}
+.scr-running .btn.primary{background:var(--color-primary);color:var(--color-on-primary);border-color:transparent;font-weight:500}
+.scr-running .btn.on{background:var(--accent-tint,rgba(79,127,193,.12));border-color:var(--color-primary);color:var(--color-primary)}
+.scr-running .btn.sm{padding:5px 9px;font-size:11.5px}
+.scr-running .search{flex:0 0 170px;border:1px solid var(--color-border);background:var(--color-bg);border-radius:var(--p-radius);padding:6px 10px;font-size:12px;color:var(--color-text-muted)}
+.scr-running /* category filter chips */
+.cats{display:flex;align-items:center;gap:7px;padding:9px var(--p-space-4);border-bottom:1px solid var(--color-border);background:var(--color-bg);flex-wrap:wrap}
+.scr-running .cat{font-size:12px;padding:4px 11px;border-radius:20px;border:1px solid var(--color-border);background:var(--color-surface);color:var(--color-text-muted);cursor:pointer}
+.scr-running .cat .n{font-size:10px;opacity:.7;margin-left:4px}
+.scr-running .cat.on{background:var(--color-primary);color:var(--color-on-primary);border-color:transparent;font-weight:500}
+.scr-running .cats .label{font-size:11px;color:var(--color-text-muted);text-transform:uppercase;letter-spacing:.05em;margin-right:2px}
+.scr-running .list{flex:1;overflow:auto;padding:var(--p-space-2) var(--p-space-4)}
+.scr-running .ghead{display:flex;align-items:center;gap:8px;font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--color-text-muted);margin:var(--p-space-3) 4px var(--p-space-2)}
+.scr-running .ghead .gc{background:var(--color-border);color:var(--color-text-muted);border-radius:20px;font-size:10px;padding:0 7px}
+.scr-running .row{display:flex;align-items:center;gap:11px;padding:9px var(--p-space-3);background:var(--color-surface);border:1px solid var(--color-border);border-radius:var(--p-radius);margin-bottom:7px}
+.scr-running .row.sel{outline:2px solid var(--color-primary);outline-offset:-1px}
+.scr-running .cb{width:16px;height:16px;border-radius:4px;border:1.5px solid var(--color-border);flex:0 0 16px;display:grid;place-items:center;color:#fff;font-size:11px}
+.scr-running .cb.on{background:var(--color-primary);border-color:var(--color-primary)}
+.scr-running .st{width:9px;height:9px;border-radius:50%;flex:0 0 9px}
+.scr-running .st.ok{background:var(--color-ok)}
+.scr-running .st.fail{background:var(--color-danger)}
+.scr-running .st.warn{background:var(--color-warn)}
+.scr-running .st.off{background:var(--p-grey-400)}
+.scr-running .meta{min-width:0;flex:1}
+.scr-running .name{font-weight:600;display:flex;align-items:center;gap:8px;font-size:13px}
+.scr-running .chip{font-size:10px;padding:1px 7px;border-radius:20px;border:1px solid var(--color-border);color:var(--color-text-muted);font-weight:500}
+.scr-running .chip.wrap{background:var(--accent-tint,rgba(79,127,193,.12));border-color:transparent;color:var(--color-primary)}
+.scr-running .cmd{font-family:var(--p-font-mono);font-size:11px;color:var(--color-text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px}
+.scr-running .sched{flex:0 0 150px}
+.scr-running .sched .h{font-size:12px}
+.scr-running .sched .raw{font-family:var(--p-font-mono);font-size:10.5px;color:var(--color-text-muted);margin-top:1px}
+.scr-running .last{flex:0 0 124px;font-size:11.5px;color:var(--color-text-muted);font-variant-numeric:tabular-nums}
+.scr-running .acts{display:flex;align-items:center;gap:6px;flex:0 0 auto}
+.scr-running .toggle{width:32px;height:18px;border-radius:20px;background:var(--color-ok);position:relative;cursor:pointer}
+.scr-running .toggle.off{background:var(--p-grey-400)}
+.scr-running .toggle::after{content:"";position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:#fff}
+.scr-running .toggle.off::after{left:auto;right:2px}
+.scr-running .icbtn{width:28px;height:28px;border-radius:var(--p-radius);border:1px solid var(--color-border);background:var(--color-surface);cursor:pointer;color:var(--color-text-muted)}
+.scr-running /* generalized batch action bar */
+.batch{display:flex;align-items:center;gap:10px;padding:8px var(--p-space-3);background:var(--accent-tint,rgba(79,127,193,.12));border:1px solid var(--color-primary);border-radius:var(--p-radius);margin:0 0 8px;font-size:12.5px;position:sticky;top:0;z-index:2}
+.scr-running .batch b{color:var(--color-primary)}
+.scr-running .batch .vline{width:1px;height:18px;background:var(--color-border)}
+.scr-running .rspin{display:inline-block;width:12px;height:12px;border:2px solid rgba(var(--color-primary-rgb),.35);border-top-color:var(--color-primary);border-radius:50%;vertical-align:-2px;margin-right:5px}
+.scr-running .st.running{background:var(--color-primary)}
+.scr-running .pbar{flex:0 0 160px;height:6px;border-radius:6px;background:rgba(var(--color-primary-rgb),.18);overflow:hidden}
+.scr-running .pfill{width:50%;height:100%;background:var(--color-primary)}
+.scr-running .runbadge{color:var(--color-primary);font-weight:500}
+/* rd */
+.scr-rd .win{width:1100px;height:720px;display:flex;overflow:hidden;font-size:13px}
+.scr-rd .nav{width:212px;flex:0 0 212px;background:var(--nav-bg);color:var(--nav-text);display:flex;flex-direction:column;padding:var(--p-space-4) 0;border-right:1px solid var(--nav-border)}
+.scr-rd .brand{display:flex;align-items:center;gap:8px;padding:0 var(--p-space-4) var(--p-space-4);font-weight:600;font-size:15px}
+.scr-rd .brand .dot{width:20px;height:20px;border-radius:5px;background:var(--color-primary);display:grid;place-items:center;font-size:12px}
+.scr-rd .brand small{display:block;font-weight:400;font-size:11px;color:var(--nav-muted)}
+.scr-rd .navsec{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--nav-muted);padding:var(--p-space-3) var(--p-space-4) var(--p-space-1)}
+.scr-rd .navitem{display:flex;align-items:center;gap:10px;padding:8px var(--p-space-4);color:var(--nav-text);border-left:2px solid transparent}
+.scr-rd .navitem.active{background:var(--nav-active-bg);color:var(--nav-active-text);border-left-color:var(--color-primary);font-weight:500}
+.scr-rd .navitem .ic{width:16px;text-align:center;opacity:.9}
+.scr-rd .navitem .cnt{margin-left:auto;font-size:11px;color:var(--nav-muted)}
+.scr-rd .spacer{flex:1}
+.scr-rd .navfoot{padding:var(--p-space-3) var(--p-space-4) 0;border-top:1px solid var(--nav-border);margin-top:var(--p-space-3);color:var(--nav-muted);font-size:11px}
+.scr-rd .main{flex:1;display:flex;flex-direction:column;min-width:0}
+.scr-rd .crumb{padding:10px var(--p-space-4);border-bottom:1px solid var(--color-border);background:var(--color-surface);color:var(--color-text-muted);font-size:12px}
+.scr-rd .crumb a{color:var(--color-primary);text-decoration:none}
+.scr-rd .jobhead{display:flex;align-items:center;gap:var(--p-space-3);padding:var(--p-space-3) var(--p-space-4);border-bottom:1px solid var(--color-border)}
+.scr-rd .jobhead .st{width:9px;height:9px;border-radius:50%;background:var(--color-danger)}
+.scr-rd .jobhead h1{font-size:16px;margin:0}
+.scr-rd .jobhead .cmd{font-family:var(--p-font-mono);font-size:12px;color:var(--color-text-muted);margin-top:3px}
+.scr-rd .jobhead .sched{font-size:12px;color:var(--color-text-muted)}
+.scr-rd .grow{flex:1}
+.scr-rd .btn{border:1px solid var(--color-border);background:var(--color-surface);color:var(--color-text);border-radius:var(--p-radius);padding:6px 12px;font-size:12px;cursor:pointer}
+.scr-rd .btn.primary{background:var(--color-primary);color:var(--color-on-primary);border-color:transparent;font-weight:500}
+.scr-rd .split{flex:1;display:flex;min-height:0}
+.scr-rd .hist{flex:0 0 340px;border-right:1px solid var(--color-border);overflow:auto;padding:var(--p-space-3)}
+.scr-rd .histh{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--color-text-muted);margin:4px 4px var(--p-space-2)}
+.scr-rd .hrow{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:var(--p-radius);cursor:pointer;font-variant-numeric:tabular-nums}
+.scr-rd .hrow.sel{background:var(--accent-tint,rgba(79,127,193,.12))}
+.scr-rd .badge{font-size:10px;font-weight:600;padding:2px 8px;border-radius:20px}
+.scr-rd .badge.ok{background:rgba(63,164,91,.16);color:var(--color-ok)}
+.scr-rd .badge.fail{background:rgba(192,73,63,.16);color:var(--color-danger)}
+.scr-rd .badge.warn{background:rgba(201,150,46,.16);color:var(--color-warn)}
+.scr-rd .badge.run{background:rgba(79,127,193,.16);color:var(--color-primary)}
+.scr-rd .hrow .when{font-size:12.5px}
+.scr-rd .hrow .sub{font-size:11px;color:var(--color-text-muted)}
+.scr-rd .trig{margin-left:auto;font-size:10px;color:var(--color-text-muted);border:1px solid var(--color-border);border-radius:20px;padding:1px 7px}
+.scr-rd .out{flex:1;display:flex;flex-direction:column;min-width:0}
+.scr-rd .outbar{display:flex;align-items:center;gap:var(--p-space-3);padding:10px var(--p-space-3);border-bottom:1px solid var(--color-border)}
+.scr-rd .tab{font-size:12px;padding:4px 10px;border-radius:var(--p-radius);color:var(--color-text-muted);cursor:pointer}
+.scr-rd .tab.on{background:var(--accent-tint,rgba(79,127,193,.12));color:var(--color-primary);font-weight:600}
+.scr-rd .outmeta{margin-left:auto;font-size:11.5px;color:var(--color-text-muted);font-variant-numeric:tabular-nums}
+.scr-rd .term{flex:1;overflow:auto;background:var(--color-code-bg);font-family:var(--p-font-mono);font-size:12px;line-height:1.55;padding:var(--p-space-3) var(--p-space-4);white-space:pre-wrap;word-wrap:break-word}
+.scr-rd .term .err{color:var(--color-danger)}
+.scr-rd .term .dim{color:var(--color-text-muted)}
+/* ed */
+.scr-ed .win{width:1100px;height:720px;position:relative;overflow:hidden;font-size:13px;background:var(--color-bg)}
+.scr-ed .dim{position:absolute;inset:0;background:rgba(0,0,0,.45)}
+.scr-ed .modal{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:560px;background:var(--color-surface);border:1px solid var(--color-border);border-radius:10px;box-shadow:0 20px 60px rgba(0,0,0,.35);overflow:hidden}
+.scr-ed .mh{display:flex;align-items:center;padding:var(--p-space-4);border-bottom:1px solid var(--color-border)}
+.scr-ed .mh h2{font-size:15px;margin:0}
+.scr-ed .mh .x{margin-left:auto;color:var(--color-text-muted);cursor:pointer;font-size:18px}
+.scr-ed .mb{padding:var(--p-space-4);max-height:520px;overflow:auto}
+.scr-ed .fld{margin-bottom:var(--p-space-3)}
+.scr-ed .fld>label{display:block;font-size:12px;font-weight:500;margin-bottom:5px}
+.scr-ed .fld .hint{font-size:11px;color:var(--color-text-muted);font-weight:400}
+.scr-ed .in{width:100%;border:1px solid var(--color-border);background:var(--color-bg);color:var(--color-text);border-radius:var(--p-radius);padding:8px 10px;font-size:13px}
+.scr-ed .in.mono{font-family:var(--p-font-mono);font-size:12.5px}
+.scr-ed textarea.in{resize:vertical;min-height:46px}
+.scr-ed .two{display:flex;gap:var(--p-space-3)}
+.scr-ed .two>div{flex:1}
+.scr-ed .preview{margin-top:6px;font-size:12px;color:var(--color-primary);background:var(--accent-tint,rgba(79,127,193,.12));border-radius:var(--p-radius);padding:6px 10px}
+.scr-ed .envrow{display:flex;gap:8px;margin-bottom:6px}
+.scr-ed .envrow .in{flex:1}
+.scr-ed .addenv{font-size:12px;color:var(--color-primary);cursor:pointer;background:none;border:0;padding:2px 0}
+.scr-ed .mf{display:flex;align-items:center;gap:var(--p-space-3);padding:var(--p-space-3) var(--p-space-4);border-top:1px solid var(--color-border);background:var(--color-bg)}
+.scr-ed .adopt{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--color-text-muted)}
+.scr-ed .sw{width:34px;height:19px;border-radius:20px;background:var(--color-primary);position:relative}
+.scr-ed .sw::after{content:"";position:absolute;top:2px;left:auto;right:2px;width:15px;height:15px;border-radius:50%;background:#fff}
+.scr-ed .grow{flex:1}
+.scr-ed .btn{border:1px solid var(--color-border);background:var(--color-surface);color:var(--color-text);border-radius:var(--p-radius);padding:8px 16px;font-size:13px;cursor:pointer}
+.scr-ed .btn.primary{background:var(--color-primary);color:var(--color-on-primary);border-color:transparent;font-weight:500}
+.scr-ed /* faint underlying list */
+.ghost{position:absolute;inset:0;padding:18px;color:var(--color-text-muted);opacity:.5;font-size:13px}
+.scr-ed .ghost .b{height:54px;background:var(--color-surface);border:1px solid var(--color-border);border-radius:var(--p-radius);margin-bottom:8px}
+/* empty */
+.scr-empty .win{width:1100px;height:720px;display:flex;overflow:hidden;font-size:13px}
+.scr-empty .nav{width:212px;flex:0 0 212px;background:var(--nav-bg);color:var(--nav-text);display:flex;flex-direction:column;padding:var(--p-space-4) 0;border-right:1px solid var(--nav-border)}
+.scr-empty .brand{display:flex;align-items:center;gap:10px;padding:0 var(--p-space-4) var(--p-space-4);font-weight:600;font-size:15px}
+.scr-empty .tile{width:30px;height:30px;border-radius:7px;background:linear-gradient(160deg,#23232c,#0b0b0f);display:grid;place-items:center;flex:0 0 30px}
+.scr-empty .dial{color:#7299cd}
+.scr-empty .brand small{display:block;font-weight:400;font-size:11px;color:var(--nav-muted)}
+.scr-empty .navsec{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--nav-muted);padding:var(--p-space-3) var(--p-space-4) var(--p-space-1)}
+.scr-empty .navitem{display:flex;align-items:center;gap:10px;padding:8px var(--p-space-4);color:var(--nav-text);border-left:2px solid transparent}
+.scr-empty .navitem.active{background:var(--nav-active-bg);color:var(--nav-active-text);border-left-color:var(--color-primary);font-weight:500}
+.scr-empty .navitem .ic{width:16px;text-align:center;opacity:.9}
+.scr-empty .spacer{flex:1}
+.scr-empty .navfoot{padding:var(--p-space-3) var(--p-space-4) 0;border-top:1px solid var(--nav-border);margin-top:var(--p-space-3);color:var(--nav-muted);font-size:11px}
+.scr-empty .main{flex:1;display:grid;place-items:center;padding:40px}
+.scr-empty .empty{max-width:460px;text-align:center}
+.scr-empty .bigdial{width:104px;height:104px;color:var(--color-primary);margin-bottom:var(--p-space-4);opacity:.92}
+.scr-empty .empty h1{font-size:22px;margin:0 0 6px}
+.scr-empty .empty .tag{color:var(--color-text-muted);font-size:14px;margin:0 0 var(--p-space-4)}
+.scr-empty .empty p{color:var(--color-text-muted);font-size:13px;line-height:1.6;margin:0 auto var(--p-space-4);max-width:400px}
+.scr-empty .cta{display:flex;gap:10px;justify-content:center}
+.scr-empty .btn{border:1px solid var(--color-border);background:var(--color-surface);color:var(--color-text);border-radius:var(--p-radius);padding:9px 18px;font-size:13px;cursor:pointer}
+.scr-empty .btn.primary{background:var(--color-primary);color:var(--color-on-primary);border-color:transparent;font-weight:500}
+.scr-empty .note{margin-top:var(--p-space-4);font-size:11.5px;color:var(--color-text-muted)}
+.scr-empty .note code{font-family:var(--p-font-mono);background:var(--color-code-bg);padding:1px 5px;border-radius:4px}
+/* ds */
+.scr-ds .wrap{width:1100px;padding:28px 32px}
+.scr-ds h1{font-size:20px;margin:0 0 2px}
+.scr-ds .lead{color:var(--color-text-muted);font-size:13px;margin:0 0 24px}
+.scr-ds h2{font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--color-text-muted);margin:26px 0 12px;border-bottom:1px solid var(--color-border);padding-bottom:6px}
+.scr-ds .row{display:flex;flex-wrap:wrap;gap:14px;align-items:flex-start}
+.scr-ds .sw{width:96px}
+.scr-ds .sw .c{height:52px;border-radius:8px;border:1px solid var(--color-border)}
+.scr-ds .sw .n{font-size:11px;margin-top:5px;font-weight:500}
+.scr-ds .sw .v{font-size:10.5px;color:var(--color-text-muted);font-family:var(--p-font-mono)}
+.scr-ds .card{background:var(--color-surface);border:1px solid var(--color-border);border-radius:var(--p-radius);padding:14px 16px}
+.scr-ds .btn{border:1px solid var(--color-border);background:var(--color-surface);color:var(--color-text);border-radius:var(--p-radius);padding:7px 14px;font-size:12px;cursor:pointer}
+.scr-ds .btn.primary{background:var(--color-primary);color:var(--color-on-primary);border-color:transparent;font-weight:500}
+.scr-ds .btn.danger{background:var(--color-danger);color:#fff;border-color:transparent}
+.scr-ds .chip{font-size:10px;padding:2px 9px;border-radius:20px;border:1px solid var(--color-border);color:var(--color-text-muted);font-weight:500;flex:0 0 auto;align-self:flex-start;width:max-content}
+.scr-ds .chip.wrap{background:rgba(var(--color-primary-rgb),.12);border-color:transparent;color:var(--color-primary)}
+.scr-ds .badge{font-size:10px;font-weight:600;padding:3px 10px;border-radius:20px}
+.scr-ds .badge.ok{background:rgba(63,164,91,.16);color:var(--color-ok)}
+.scr-ds .badge.fail{background:rgba(192,73,63,.16);color:var(--color-danger)}
+.scr-ds .badge.warn{background:rgba(201,150,46,.16);color:var(--color-warn)}
+.scr-ds .badge.run{background:rgba(79,127,193,.16);color:var(--color-primary)}
+.scr-ds .st{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px;vertical-align:middle}
+.scr-ds .st.ok{background:var(--color-ok)}
+.scr-ds .st.fail{background:var(--color-danger)}
+.scr-ds .st.warn{background:var(--color-warn)}
+.scr-ds .st.off{background:var(--p-grey-400)}
+.scr-ds .toggle{display:inline-block;width:34px;height:19px;border-radius:20px;background:var(--color-ok);position:relative;vertical-align:middle}
+.scr-ds .toggle.off{background:var(--p-grey-400)}
+.scr-ds .toggle::after{content:"";position:absolute;top:2px;left:2px;width:15px;height:15px;border-radius:50%;background:#fff}
+.scr-ds .toggle.off::after{left:auto;right:2px}
+.scr-ds .in{border:1px solid var(--color-border);background:var(--color-bg);color:var(--color-text);border-radius:var(--p-radius);padding:8px 10px;font-size:12px;width:220px}
+.scr-ds .term{background:var(--color-code-bg);font-family:var(--p-font-mono);font-size:12px;line-height:1.5;padding:12px 14px;border-radius:var(--p-radius);white-space:pre-wrap}
+.scr-ds .term .err{color:var(--color-danger)}
+.scr-ds .term .dim{color:var(--color-text-muted)}
+.scr-ds .mono{font-family:var(--p-font-mono)}
+.scr-ds .lbl{font-size:11px;color:var(--color-text-muted);width:100%;margin:-4px 0 2px}
+</style></head>
+<body>
+<div class="bar">
+  <span class="name">ChronosUI &middot; Plan 6 mockups</span>
+  <button class="tab on" data-scr="sched">Schedules</button>
+  <button class="tab" data-scr="running">Run Now (live)</button>
+  <button class="tab" data-scr="rd">Run detail</button>
+  <button class="tab" data-scr="ed">Job editor</button>
+  <button class="tab" data-scr="empty">First-run</button>
+  <button class="tab" data-scr="ds">Design system</button>
+  <span class="spacer"></span>
+  <button class="tbtn" id="themebtn">&#9790; Dark</button>
+</div>
+<div class="stage">
+<div class="screen scr-sched active"><div class="win">
+  <aside class="nav">
+    <div class="brand"><span class="tile"><svg class="dial" viewBox="0 0 100 100" fill="none" stroke="currentColor" stroke-linecap="round"><circle cx="50" cy="50" r="39" stroke-width="2.2" opacity=".5"/><line x1="50" y1="11" x2="50" y2="21" stroke-width="3.2"/><line x1="69.5" y1="16.23" x2="66.5" y2="21.42" stroke-width="1.6"/><line x1="83.77" y1="30.5" x2="78.58" y2="33.5" stroke-width="1.6"/><line x1="89" y1="50" x2="79" y2="50" stroke-width="3.2"/><line x1="83.77" y1="69.5" x2="78.58" y2="66.5" stroke-width="1.6"/><line x1="69.5" y1="83.77" x2="66.5" y2="78.58" stroke-width="1.6"/><line x1="50" y1="89" x2="50" y2="79" stroke-width="3.2"/><line x1="30.5" y1="83.77" x2="33.5" y2="78.58" stroke-width="1.6"/><line x1="16.23" y1="69.5" x2="21.42" y2="66.5" stroke-width="1.6"/><line x1="11" y1="50" x2="21" y2="50" stroke-width="3.2"/><line x1="16.23" y1="30.5" x2="21.42" y2="33.5" stroke-width="1.6"/><line x1="30.5" y1="16.23" x2="33.5" y2="21.42" stroke-width="1.6"/><line x1="50" y1="50" x2="73.38" y2="36.5" stroke-width="3"/><line x1="50" y1="50" x2="36.07" y2="40.25" stroke-width="3.6"/><circle cx="50" cy="50" r="3.4" fill="currentColor" stroke="none"/></svg></span><div>ChronosUI<small>Bring Order to Time</small></div></div>
+    <div class="navsec">Manage</div>
+    <div class="navitem active"><span class="ic">▤</span> Schedules <span class="cnt">6</span></div>
+    <div class="navitem"><span class="ic">≡</span> Run History</div>
+    <div class="navitem"><span class="ic">⚙</span> Settings</div>
+    <div class="spacer"></div>
+    <div class="navfoot"><span>v0.1.0 · crontab</span><button class="themebtn">🌙</button></div>
+  </aside>
+
+  <div class="main">
+    <div class="topbar">
+      <h1>Schedules</h1><span class="sub">· 5 managed, 1 unmanaged</span>
+      <span class="grow"></span>
+      <input class="search" placeholder="Search…">
+      <button class="btn on">☑ Select</button>
+      <button class="btn">⟳ Scan</button>
+      <button class="btn primary">＋ New job</button>
+    </div>
+
+    <div class="cats">
+      <span class="label">Category</span>
+      <span class="cat on">All <span class="n">6</span></span>
+      <span class="cat">backups <span class="n">2</span></span>
+      <span class="cat">maintenance <span class="n">2</span></span>
+      <span class="cat">web <span class="n">1</span></span>
+      <span class="cat">uncategorized <span class="n">1</span></span>
+    </div>
+
+    <div class="list">
+      <div class="batch">
+        <b>2 selected</b><span class="vline"></span>
+        <button class="btn sm">▶ Run</button>
+        <button class="btn sm">Enable</button>
+        <button class="btn sm">Disable</button>
+        <button class="btn sm">Adopt</button>
+        <button class="btn sm" style="color:var(--color-danger)">🗑 Delete</button>
+        <span class="grow"></span>
+        <button class="btn sm">✕ Clear</button>
+      </div>
+
+      <div class="ghead">backups <span class="gc">2</span></div>
+      <div class="row sel">
+        <span class="cb on">✓</span><span class="st ok"></span>
+        <div class="meta"><div class="name">Nightly DB backup <span class="chip wrap">wrapped</span></div><div class="cmd">/usr/bin/pg_dump assistant | gzip &gt; /backups/db-$(date +%F).sql.gz</div></div>
+        <div class="sched"><div class="h">Daily at 03:00</div><div class="raw">0 3 * * *</div></div>
+        <div class="last">2h ago · ok · 4.2s</div>
+        <div class="acts"><div class="toggle"></div><button class="btn sm primary">▶ Run</button><button class="icbtn">⋯</button></div>
+      </div>
+      <div class="row">
+        <span class="cb"></span><span class="st fail"></span>
+        <div class="meta"><div class="name">Sync photos to NAS <span class="chip wrap">wrapped</span></div><div class="cmd">rsync -a ~/Pictures/ /Volumes/nas/photos/ &amp;&amp; notify done</div></div>
+        <div class="sched"><div class="h">Every 6 hours</div><div class="raw">0 */6 * * *</div></div>
+        <div class="last">12m ago · <span style="color:var(--color-danger)">failed</span></div>
+        <div class="acts"><div class="toggle"></div><button class="btn sm primary">▶ Run</button><button class="icbtn">⋯</button></div>
+      </div>
+
+      <div class="ghead">maintenance <span class="gc">2</span></div>
+      <div class="row sel">
+        <span class="cb on">✓</span><span class="st warn"></span>
+        <div class="meta"><div class="name">Reindex search <span class="chip wrap">wrapped</span></div><div class="cmd">python3 /opt/jobs/reindex.py --full</div></div>
+        <div class="sched"><div class="h">Mon at 02:30</div><div class="raw">30 2 * * 1</div></div>
+        <div class="last">3d ago · <span style="color:var(--color-warn)">timeout</span></div>
+        <div class="acts"><div class="toggle"></div><button class="btn sm primary">▶ Run</button><button class="icbtn">⋯</button></div>
+      </div>
+      <div class="row">
+        <span class="cb"></span><span class="st off"></span>
+        <div class="meta"><div class="name">Weekly cleanup <span class="chip">not wrapped</span></div><div class="cmd">find /tmp -mtime +7 -delete</div></div>
+        <div class="sched"><div class="h">Sun at 04:00</div><div class="raw">0 4 * * 0</div></div>
+        <div class="last">disabled</div>
+        <div class="acts"><div class="toggle off"></div><button class="btn sm">▶ Run</button><button class="icbtn">⋯</button></div>
+      </div>
+
+      <div class="ghead">found in crontab — not yet managed <span class="gc">1</span></div>
+      <div class="row">
+        <span class="cb"></span><span class="st off"></span>
+        <div class="meta"><div class="name">certbot renew <span class="chip">unmanaged</span></div><div class="cmd">/usr/bin/certbot renew --quiet</div></div>
+        <div class="sched"><div class="h">Daily at 00:00</div><div class="raw">0 0 * * *</div></div>
+        <div class="last">read-only until adopted</div>
+        <div class="acts"><button class="btn sm">▶ Run</button><button class="btn sm">Adopt</button></div>
+      </div>
+    </div>
+  </div>
+</div></div>
+<div class="screen scr-running"><div class="win">
+  <aside class="nav">
+    <div class="brand"><span class="tile"><svg class="dial" viewBox="0 0 100 100" fill="none" stroke="currentColor" stroke-linecap="round"><circle cx="50" cy="50" r="39" stroke-width="2.2" opacity=".5"/><line x1="50" y1="11" x2="50" y2="21" stroke-width="3.2"/><line x1="69.5" y1="16.23" x2="66.5" y2="21.42" stroke-width="1.6"/><line x1="83.77" y1="30.5" x2="78.58" y2="33.5" stroke-width="1.6"/><line x1="89" y1="50" x2="79" y2="50" stroke-width="3.2"/><line x1="83.77" y1="69.5" x2="78.58" y2="66.5" stroke-width="1.6"/><line x1="69.5" y1="83.77" x2="66.5" y2="78.58" stroke-width="1.6"/><line x1="50" y1="89" x2="50" y2="79" stroke-width="3.2"/><line x1="30.5" y1="83.77" x2="33.5" y2="78.58" stroke-width="1.6"/><line x1="16.23" y1="69.5" x2="21.42" y2="66.5" stroke-width="1.6"/><line x1="11" y1="50" x2="21" y2="50" stroke-width="3.2"/><line x1="16.23" y1="30.5" x2="21.42" y2="33.5" stroke-width="1.6"/><line x1="30.5" y1="16.23" x2="33.5" y2="21.42" stroke-width="1.6"/><line x1="50" y1="50" x2="73.38" y2="36.5" stroke-width="3"/><line x1="50" y1="50" x2="36.07" y2="40.25" stroke-width="3.6"/><circle cx="50" cy="50" r="3.4" fill="currentColor" stroke="none"/></svg></span><div>ChronosUI<small>Bring Order to Time</small></div></div>
+    <div class="navsec">Manage</div>
+    <div class="navitem active"><span class="ic">▤</span> Schedules <span class="cnt">6</span></div>
+    <div class="navitem"><span class="ic">≡</span> Run History</div>
+    <div class="navitem"><span class="ic">⚙</span> Settings</div>
+    <div class="spacer"></div>
+    <div class="navfoot"><span>v0.1.0 · crontab</span><button class="themebtn">🌙</button></div>
+  </aside>
+
+  <div class="main">
+    <div class="topbar">
+      <h1>Schedules</h1><span class="sub">· 5 managed, 1 unmanaged</span>
+      <span class="grow"></span>
+      <input class="search" placeholder="Search…">
+      <button class="btn on">☑ Select</button>
+      <button class="btn">⟳ Scan</button>
+      <button class="btn primary">＋ New job</button>
+    </div>
+
+    <div class="cats">
+      <span class="label">Category</span>
+      <span class="cat on">All <span class="n">6</span></span>
+      <span class="cat">backups <span class="n">2</span></span>
+      <span class="cat">maintenance <span class="n">2</span></span>
+      <span class="cat">web <span class="n">1</span></span>
+      <span class="cat">uncategorized <span class="n">1</span></span>
+    </div>
+
+    <div class="list">
+      <div class="batch">
+        <span class="rspin"></span><b>Running batch &middot; 1 of 2 done</b>
+        <div class="pbar"><div class="pfill"></div></div>
+        <span class="grow"></span>
+        <span style="color:var(--color-text-muted);font-size:11.5px">live &mdash; no refresh needed</span>
+        <button class="btn sm">■ Cancel remaining</button>
+      </div>
+
+      <div class="ghead">backups <span class="gc">2</span></div>
+      <div class="row sel">
+        <span class="cb on">✓</span><span class="st ok"></span>
+        <div class="meta"><div class="name">Nightly DB backup <span class="chip wrap">wrapped</span></div><div class="cmd">/usr/bin/pg_dump assistant | gzip &gt; /backups/db-$(date +%F).sql.gz</div></div>
+        <div class="sched"><div class="h">Daily at 03:00</div><div class="raw">0 3 * * *</div></div>
+        <div class="last" style="color:var(--color-ok)">✓ done · 4.1s · just now</div>
+        <div class="acts"><div class="toggle"></div><button class="btn sm primary">▶ Run</button><button class="icbtn">⋯</button></div>
+      </div>
+      <div class="row">
+        <span class="cb"></span><span class="st fail"></span>
+        <div class="meta"><div class="name">Sync photos to NAS <span class="chip wrap">wrapped</span></div><div class="cmd">rsync -a ~/Pictures/ /Volumes/nas/photos/ &amp;&amp; notify done</div></div>
+        <div class="sched"><div class="h">Every 6 hours</div><div class="raw">0 */6 * * *</div></div>
+        <div class="last">12m ago · <span style="color:var(--color-danger)">failed</span></div>
+        <div class="acts"><div class="toggle"></div><button class="btn sm primary">▶ Run</button><button class="icbtn">⋯</button></div>
+      </div>
+
+      <div class="ghead">maintenance <span class="gc">2</span></div>
+      <div class="row sel">
+        <span class="cb on">✓</span><span class="st running"></span>
+        <div class="meta"><div class="name">Reindex search <span class="chip wrap">wrapped</span></div><div class="cmd">python3 /opt/jobs/reindex.py --full</div></div>
+        <div class="sched"><div class="h">Mon at 02:30</div><div class="raw">30 2 * * 1</div></div>
+        <div class="last"><span class="runbadge"><span class="rspin"></span>running 0:07…</span></div>
+        <div class="acts"><div class="toggle"></div><button class="btn sm primary">▶ Run</button><button class="icbtn">⋯</button></div>
+      </div>
+      <div class="row">
+        <span class="cb"></span><span class="st off"></span>
+        <div class="meta"><div class="name">Weekly cleanup <span class="chip">not wrapped</span></div><div class="cmd">find /tmp -mtime +7 -delete</div></div>
+        <div class="sched"><div class="h">Sun at 04:00</div><div class="raw">0 4 * * 0</div></div>
+        <div class="last">disabled</div>
+        <div class="acts"><div class="toggle off"></div><button class="btn sm">▶ Run</button><button class="icbtn">⋯</button></div>
+      </div>
+
+      <div class="ghead">found in crontab — not yet managed <span class="gc">1</span></div>
+      <div class="row">
+        <span class="cb"></span><span class="st off"></span>
+        <div class="meta"><div class="name">certbot renew <span class="chip">unmanaged</span></div><div class="cmd">/usr/bin/certbot renew --quiet</div></div>
+        <div class="sched"><div class="h">Daily at 00:00</div><div class="raw">0 0 * * *</div></div>
+        <div class="last">read-only until adopted</div>
+        <div class="acts"><button class="btn sm">▶ Run</button><button class="btn sm">Adopt</button></div>
+      </div>
+    </div>
+  </div>
+</div></div>
+<div class="screen scr-rd"><div class="win">
+  <aside class="nav">
+    <div class="brand"><span class="dot">⏱</span><div>ChronosUI<small>Bring Order to Time</small></div></div>
+    <div class="navsec">Manage</div>
+    <div class="navitem"><span class="ic">▤</span> Schedules <span class="cnt">6</span></div>
+    <div class="navitem active"><span class="ic">≡</span> Run History</div>
+    <div class="navitem"><span class="ic">⚙</span> Settings</div>
+    <div class="spacer"></div>
+    <div class="navfoot">v0.1.0 · macOS crontab</div>
+  </aside>
+  <div class="main">
+    <div class="crumb"><a>Schedules</a> › Sync photos to NAS</div>
+    <div class="jobhead">
+      <span class="st"></span>
+      <div><h1>Sync photos to NAS</h1><div class="cmd">rsync -a ~/Pictures/ /Volumes/nas/photos/ &amp;&amp; notify done</div></div>
+      <span class="grow"></span>
+      <span class="sched">Every 6 hours&nbsp;&nbsp;<code style="font-family:var(--p-font-mono)">0 */6 * * *</code></span>
+      <button class="btn">Edit</button>
+      <button class="btn primary">▶ Run now</button>
+    </div>
+    <div class="split">
+      <div class="hist">
+        <div class="histh">Run history · last 50</div>
+        <div class="hrow sel"><span class="badge fail">failed</span><div><div class="when">Today 12:00</div><div class="sub">exit 23 · 1.8s</div></div><span class="trig">schedule</span></div>
+        <div class="hrow"><span class="badge ok">success</span><div><div class="when">Today 06:00</div><div class="sub">exit 0 · 41s</div></div><span class="trig">schedule</span></div>
+        <div class="hrow"><span class="badge run">running…</span><div><div class="when">Now</div><div class="sub">streaming live</div></div><span class="trig">manual</span></div>
+        <div class="hrow"><span class="badge ok">success</span><div><div class="when">Today 00:00</div><div class="sub">exit 0 · 38s</div></div><span class="trig">schedule</span></div>
+        <div class="hrow"><span class="badge warn">timeout</span><div><div class="when">Yest 18:00</div><div class="sub">600s cap</div></div><span class="trig">schedule</span></div>
+        <div class="hrow"><span class="badge ok">success</span><div><div class="when">Yest 12:00</div><div class="sub">exit 0 · 44s</div></div><span class="trig">manual</span></div>
+      </div>
+      <div class="out">
+        <div class="outbar">
+          <span class="tab on">stdout</span><span class="tab">stderr</span>
+          <span class="outmeta">schedule · started 12:00:01 · ended 12:00:03 · exit 23</span>
+        </div>
+        <div class="term"><span class="dim"># rsync -a ~/Pictures/ /Volumes/nas/photos/ &amp;&amp; notify done</span>
+sending incremental file list
+2026/0721/IMG_4821.HEIC
+2026/0721/IMG_4822.HEIC
+<span class="err">rsync: [receiver] mkstemp "/Volumes/nas/photos/.IMG_4822.HEIC" failed: Permission denied (13)</span>
+<span class="err">rsync error: some files/attrs were not transferred (code 23) at main.c(1338)</span>
+<span class="dim">— exited 23 after 1.8s —</span></div>
+      </div>
+    </div>
+  </div>
+</div></div>
+<div class="screen scr-ed"><div class="win">
+  <div class="ghost"><div class="b"></div><div class="b"></div><div class="b"></div><div class="b"></div></div>
+  <div class="dim"></div>
+  <div class="modal">
+    <div class="mh"><h2>New job</h2><span class="x">✕</span></div>
+    <div class="mb">
+      <div class="fld"><label>Name</label><input class="in" value="Nightly DB backup"></div>
+      <div class="fld">
+        <label>Schedule <span class="hint">— cron expression</span></label>
+        <input class="in mono" value="0 3 * * *">
+        <div class="preview">▸ Runs daily at 03:00 — next: tomorrow 03:00</div>
+      </div>
+      <div class="fld">
+        <label>Command</label>
+        <textarea class="in mono">/usr/bin/pg_dump assistant | gzip > /backups/db-$(date +%F).sql.gz</textarea>
+        <span class="hint">Runs via /bin/sh -c — pipes, &amp;&amp;, redirects all work.</span>
+      </div>
+      <div class="two">
+        <div class="fld"><label>Working dir <span class="hint">optional</span></label><input class="in mono" placeholder="~/"></div>
+        <div class="fld"><label>Timeout <span class="hint">seconds, optional</span></label><input class="in" placeholder="e.g. 600"></div>
+      </div>
+      <div class="fld">
+        <label>Environment <span class="hint">optional overrides</span></label>
+        <div class="envrow"><input class="in mono" value="PATH" style="flex:0 0 150px"><input class="in mono" value="/usr/local/bin:/usr/bin"></div>
+        <button class="addenv">＋ Add variable</button>
+      </div>
+      <div class="fld" style="margin-bottom:0"><label>Category <span class="hint">optional grouping</span></label><input class="in" placeholder="e.g. backups"></div>
+    </div>
+    <div class="mf">
+      <div class="adopt"><span class="sw"></span> Wrap with schedmgr <span class="hint">(record scheduled runs)</span></div>
+      <span class="grow"></span>
+      <button class="btn">Cancel</button>
+      <button class="btn primary">Create job</button>
+    </div>
+  </div>
+</div></div>
+<div class="screen scr-empty"><div class="win">
+  <aside class="nav">
+    <div class="brand"><span class="tile"><svg class="dial" width="22" height="22" viewBox="0 0 100 100" fill="none" stroke="currentColor" stroke-linecap="round"><circle cx="50" cy="50" r="39" stroke-width="2.2" opacity=".5"/><line x1="50" y1="11" x2="50" y2="21" stroke-width="3.2"/><line x1="89" y1="50" x2="79" y2="50" stroke-width="3.2"/><line x1="50" y1="89" x2="50" y2="79" stroke-width="3.2"/><line x1="11" y1="50" x2="21" y2="50" stroke-width="3.2"/><line x1="69.5" y1="16.23" x2="66.5" y2="21.42" stroke-width="1.6"/><line x1="83.77" y1="30.5" x2="78.58" y2="33.5" stroke-width="1.6"/><line x1="83.77" y1="69.5" x2="78.58" y2="66.5" stroke-width="1.6"/><line x1="69.5" y1="83.77" x2="66.5" y2="78.58" stroke-width="1.6"/><line x1="30.5" y1="83.77" x2="33.5" y2="78.58" stroke-width="1.6"/><line x1="16.23" y1="69.5" x2="21.42" y2="66.5" stroke-width="1.6"/><line x1="16.23" y1="30.5" x2="21.42" y2="33.5" stroke-width="1.6"/><line x1="30.5" y1="16.23" x2="33.5" y2="21.42" stroke-width="1.6"/><line x1="50" y1="50" x2="73.38" y2="36.5" stroke-width="3"/><line x1="50" y1="50" x2="36.07" y2="40.25" stroke-width="3.6"/><circle cx="50" cy="50" r="3.4" fill="currentColor" stroke="none"/></svg></span><div>ChronosUI<small>Bring Order to Time</small></div></div>
+    <div class="navsec">Manage</div>
+    <div class="navitem active"><span class="ic">▤</span> Schedules</div>
+    <div class="navitem"><span class="ic">≡</span> Run History</div>
+    <div class="navitem"><span class="ic">⚙</span> Settings</div>
+    <div class="spacer"></div>
+    <div class="navfoot">v0.1.0 · crontab</div>
+  </aside>
+
+  <div class="main">
+    <div class="empty">
+      <svg class="bigdial" viewBox="0 0 100 100" fill="none" stroke="currentColor" stroke-linecap="round"><circle cx="50" cy="50" r="39" stroke-width="2.2" opacity=".5"/><line x1="50" y1="11" x2="50" y2="21" stroke-width="3.2"/><line x1="69.5" y1="16.23" x2="66.5" y2="21.42" stroke-width="1.6"/><line x1="83.77" y1="30.5" x2="78.58" y2="33.5" stroke-width="1.6"/><line x1="89" y1="50" x2="79" y2="50" stroke-width="3.2"/><line x1="83.77" y1="69.5" x2="78.58" y2="66.5" stroke-width="1.6"/><line x1="69.5" y1="83.77" x2="66.5" y2="78.58" stroke-width="1.6"/><line x1="50" y1="89" x2="50" y2="79" stroke-width="3.2"/><line x1="30.5" y1="83.77" x2="33.5" y2="78.58" stroke-width="1.6"/><line x1="16.23" y1="69.5" x2="21.42" y2="66.5" stroke-width="1.6"/><line x1="11" y1="50" x2="21" y2="50" stroke-width="3.2"/><line x1="16.23" y1="30.5" x2="21.42" y2="33.5" stroke-width="1.6"/><line x1="30.5" y1="16.23" x2="33.5" y2="21.42" stroke-width="1.6"/><line x1="50" y1="50" x2="73.38" y2="36.5" stroke-width="3"/><line x1="50" y1="50" x2="36.07" y2="40.25" stroke-width="3.6"/><circle cx="50" cy="50" r="3.4" fill="currentColor" stroke="none"/></svg>
+      <h1>Bring order to your schedules</h1>
+      <p class="tag">ChronosUI reads the jobs already in your <b>native scheduler</b> — your crontab. Nothing is moved or migrated.</p>
+      <p>Scan to see every cron line as an editable job, with run history once you adopt it. Or create a brand-new scheduled job from scratch.</p>
+      <div class="cta">
+        <button class="btn primary">⟳ Scan crontab</button>
+        <button class="btn">＋ New job</button>
+      </div>
+      <div class="note">Reading <code>crontab -l</code> — read-only until you choose to adopt or edit a job.</div>
+    </div>
+  </div>
+</div></div>
+<div class="screen scr-ds"><div class="wrap">
+  <h1>ChronosUI Design System</h1>
+  <p class="lead">Three-layer tokens (primitive → semantic → component), brand-neutralized for OSS. Accent #4f7fc1 is a neutral default, not ManGo's brand hue.</p>
+
+  <h2>Primitive palette</h2>
+  <div class="row">
+    <div class="sw"><div class="c" style="background:#ffffff"></div><div class="n">grey-0</div><div class="v">#ffffff</div></div>
+    <div class="sw"><div class="c" style="background:#f7f7f8"></div><div class="n">grey-50</div><div class="v">#f7f7f8</div></div>
+    <div class="sw"><div class="c" style="background:#ededf0"></div><div class="n">grey-100</div><div class="v">#ededf0</div></div>
+    <div class="sw"><div class="c" style="background:#d9d9de"></div><div class="n">grey-200</div><div class="v">#d9d9de</div></div>
+    <div class="sw"><div class="c" style="background:#9a9aa3"></div><div class="n">grey-400</div><div class="v">#9a9aa3</div></div>
+    <div class="sw"><div class="c" style="background:#5c5c66"></div><div class="n">grey-600</div><div class="v">#5c5c66</div></div>
+    <div class="sw"><div class="c" style="background:#2b2b31"></div><div class="n">grey-800</div><div class="v">#2b2b31</div></div>
+    <div class="sw"><div class="c" style="background:#1a1a1f"></div><div class="n">grey-900</div><div class="v">#1a1a1f</div></div>
+    <div class="sw"><div class="c" style="background:#0a0a0a"></div><div class="n">grey-1000</div><div class="v">nav</div></div>
+  </div>
+  <div class="row" style="margin-top:14px">
+    <div class="sw"><div class="c" style="background:#4f7fc1"></div><div class="n">accent</div><div class="v">#4f7fc1</div></div>
+    <div class="sw"><div class="c" style="background:#3fa45b"></div><div class="n">ok</div><div class="v">#3fa45b</div></div>
+    <div class="sw"><div class="c" style="background:#c9962e"></div><div class="n">warn / timeout</div><div class="v">#c9962e</div></div>
+    <div class="sw"><div class="c" style="background:#c0493f"></div><div class="n">danger</div><div class="v">#c0493f</div></div>
+  </div>
+
+  <h2>Semantic tokens (current theme)</h2>
+  <div class="row">
+    <div class="sw"><div class="c" style="background:var(--color-bg)"></div><div class="n">bg</div></div>
+    <div class="sw"><div class="c" style="background:var(--color-surface)"></div><div class="n">surface</div></div>
+    <div class="sw"><div class="c" style="background:var(--color-border)"></div><div class="n">border</div></div>
+    <div class="sw"><div class="c" style="background:var(--color-text)"></div><div class="n">text</div></div>
+    <div class="sw"><div class="c" style="background:var(--color-text-muted)"></div><div class="n">text-muted</div></div>
+    <div class="sw"><div class="c" style="background:var(--color-primary)"></div><div class="n">primary</div></div>
+    <div class="sw"><div class="c" style="background:var(--color-nav-bg)"></div><div class="n">nav-bg</div></div>
+    <div class="sw"><div class="c" style="background:var(--color-code-bg)"></div><div class="n">code-bg</div></div>
+  </div>
+
+  <h2>Components</h2>
+  <div class="row" style="gap:28px;align-items:flex-start">
+    <div class="card">
+      <div class="lbl">Buttons</div>
+      <div class="row"><button class="btn primary">▶ Run now</button><button class="btn">Edit</button><button class="btn danger">Delete</button></div>
+      <div class="lbl" style="margin-top:14px">Status badges &amp; dots</div>
+      <div class="row" style="align-items:center"><span class="badge ok">success</span><span class="badge fail">failed</span><span class="badge warn">timeout</span><span class="badge run">running…</span></div>
+      <div class="row" style="align-items:center;margin-top:8px"><span><span class="st ok"></span>ok</span><span><span class="st fail"></span>failed</span><span><span class="st warn"></span>timeout</span><span><span class="st off"></span>disabled</span></div>
+      <div class="lbl" style="margin-top:14px">Chips &amp; toggles</div>
+      <div class="row" style="align-items:center"><span class="chip wrap">wrapped</span><span class="chip">unmanaged</span><span class="toggle"></span><span class="toggle off"></span></div>
+    </div>
+    <div class="card" style="flex:1">
+      <div class="lbl">Input</div>
+      <input class="in mono" value="0 3 * * *">
+      <div class="lbl" style="margin-top:14px">Execution output (mono, code-bg, ANSI-stripped, break-word — §9.4)</div>
+      <div class="term"><span class="dim"># /usr/bin/pg_dump assistant | gzip &gt; backup.sql.gz</span>
+pg_dump: dumping contents of table "tb_memories"
+<span class="err">pg_dump: error: connection to server lost</span>
+<span class="dim">— exited 1 after 0.4s —</span></div>
+    </div>
+  </div>
+
+  <h2>Typography</h2>
+  <div class="row" style="gap:40px">
+    <div><div class="lbl">Sans — system-ui</div><div style="font-size:18px">Bring Order to Time</div><div style="font-size:13px;color:var(--color-text-muted)">Schedule list, labels, body</div></div>
+    <div><div class="lbl">Mono — ui-monospace</div><div class="mono" style="font-size:14px">0 3 * * * /usr/bin/backup.sh</div><div class="mono" style="font-size:13px;color:var(--color-text-muted)">commands, cron, output, durations</div></div>
+  </div>
+</div></div>
+</div>
+<script>
+const root=document.documentElement;
+document.querySelectorAll('.tab').forEach(t=>t.addEventListener('click',()=>{
+  document.querySelectorAll('.tab').forEach(x=>x.classList.remove('on'));t.classList.add('on');
+  document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
+  document.querySelector('.scr-'+t.dataset.scr).classList.add('active');
+}));
+document.getElementById('themebtn').addEventListener('click',()=>{
+  const dark=root.getAttribute('data-theme')==='dark';
+  root.setAttribute('data-theme',dark?'light':'dark');
+  document.getElementById('themebtn').innerHTML=dark?'&#9790; Dark':'&#9728; Light';
+});
+</script>
+</body></html>

@@ -1,0 +1,14 @@
+node_modules/
+dist/
+out/
+.vite/
+*.log
+.DS_Store
+coverage/
+# build artifacts
+release/
+*.asar
+# TypeScript incremental build cache
+*.tsbuildinfo
+# Staged Go binary (produced by scripts/build-schedmgr.mjs; bundled via electron-builder extraResources)
+resources/schedmgr/

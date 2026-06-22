@@ -1,0 +1,67 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* Layer 2 — semantic: intent aliases onto primitives. THIS is the layer a theme rebinds. */
+:root,
+:root[data-theme='light'] {
+  --color-bg: var(--p-grey-50);
+  --color-surface: var(--p-grey-0);
+  --color-border: var(--p-grey-200);
+  --color-text: var(--p-grey-900);
+  --color-text-muted: var(--p-grey-600);
+  --color-primary: var(--p-accent);
+  --color-primary-rgb: var(--p-accent-rgb);
+  --color-on-primary: var(--p-grey-0);
+  --color-ok: var(--p-ok);
+  --color-warn: var(--p-warn);
+  --color-danger: var(--p-danger);
+  --color-code-bg: var(--p-grey-100);
+  /* desktop side panel (adopted always-dark, per spec §9.3) */
+  --color-nav-bg: var(--p-grey-1000);
+  --color-nav-text: var(--p-grey-50);
+  /* nav follows the theme (Plan 6 decision A) — light = white nav */
+  --nav-bg: var(--color-surface);
+  --nav-text: var(--color-text);
+  --nav-muted: var(--color-text-muted);
+  --nav-active-bg: rgba(var(--color-primary-rgb), 0.12);
+  --nav-active-text: #3a6dae; /* darkened accent — passes WCAG AA (design-director HIGH-1) */
+  --nav-border: var(--color-border);
+  /* badge text companions — ~25% darker than the dot, pass AA on the 12% tint (design-director HIGH-2) */
+  --color-ok-text: #2f7d45;
+  --color-warn-text: #94701f;
+  --color-danger-text: #9c362e;
+  --color-running-text: #3a6dae;
+  --color-shimmer-base: var(--p-grey-100);
+  --color-shimmer-highlight: var(--p-grey-200);
+  --color-stderr-text: var(--color-danger-text);
+  --color-off: var(--p-grey-600);
+}
+
+:root[data-theme='dark'] {
+  --color-bg: var(--p-grey-900);
+  --color-surface: var(--p-grey-800);
+  --color-border: var(--p-grey-600);
+  --color-text: var(--p-grey-50);
+  --color-text-muted: var(--p-grey-400);
+  --color-primary: var(--p-accent);
+  --color-primary-rgb: var(--p-accent-rgb);
+  --color-on-primary: var(--p-grey-0);
+  --color-ok: var(--p-ok);
+  --color-warn: var(--p-warn);
+  --color-danger: var(--p-danger);
+  --color-code-bg: var(--p-grey-1000);
+  --color-nav-bg: var(--p-grey-1000);
+  --color-nav-text: var(--p-grey-50);
+  --nav-bg: var(--p-grey-1000);
+  --nav-text: var(--p-grey-50);
+  --nav-muted: var(--p-grey-400);
+  --nav-active-bg: rgba(var(--color-primary-rgb), 0.18);
+  --nav-active-text: #ffffff;
+  --nav-border: var(--p-grey-900);
+  --color-ok-text: #5cc079;
+  --color-warn-text: #e0b04e;
+  --color-danger-text: #e0726a;
+  --color-running-text: #8fb4e6;
+  --color-shimmer-base: var(--p-grey-800);
+  --color-shimmer-highlight: var(--p-grey-600);
+  --color-stderr-text: #cc5048;
+  --color-off: var(--p-grey-400);
+}
