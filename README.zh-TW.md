@@ -4,6 +4,8 @@
 
 [English](./README.md) | 繁體中文
 
+[![CI](https://github.com/AugustusW/chronos-ui/actions/workflows/ci.yml/badge.svg)](https://github.com/AugustusW/chronos-ui/actions/workflows/ci.yml)
+
 ChronosUI 直接「就地」管理你已經在用的排程器——**crontab**（macOS/Linux）與 **Windows 工作排程器**——
 並補上它們缺的東西：執行歷史、輸出側錄、耗時、隨手手動執行。它是一個「管理＋觀測層」，**不是**另一個排程 daemon。
 

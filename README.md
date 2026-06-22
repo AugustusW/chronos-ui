@@ -4,6 +4,8 @@
 
 English | [繁體中文](./README.zh-TW.md)
 
+[![CI](https://github.com/AugustusW/chronos-ui/actions/workflows/ci.yml/badge.svg)](https://github.com/AugustusW/chronos-ui/actions/workflows/ci.yml)
+
 ChronosUI manages the schedulers you already use — **crontab** (macOS/Linux) and **Windows Task
 Scheduler** — in place, and adds what they lack: run history, captured output, durations, and
 on-demand manual runs. It is a management + observability layer, **not** a new scheduler daemon.
