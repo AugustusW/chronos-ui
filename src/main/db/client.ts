@@ -1,42 +1,78 @@
 // SPDX-License-Identifier: Apache-2.0
 import Database from 'better-sqlite3'
-import { drizzle, type BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
-import * as schema from './schema'
+import { Pool } from 'pg'
+import { drizzle as drizzleSqlite, type BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
+import { drizzle as drizzlePg, type NodePgDatabase } from 'drizzle-orm/node-postgres'
+import * as sqliteSchema from './schema'
+import * as pgSchema from './schema.pg'
 
-export type ChronosDb = BetterSQLite3Database<typeof schema>
+export type SqliteDb = BetterSQLite3Database<typeof sqliteSchema>
+export type PgDb = NodePgDatabase<typeof pgSchema>
+/** The canonical SQLite Drizzle handle — the synchronous repositories type against this. */
+export type ChronosDb = SqliteDb
+/** Either dialect's Drizzle handle — what `DatabaseHandle.db` actually holds at runtime.
+ *  Consumers narrow it via the handle's `dialect` tag (the Repositories factory does this). */
+export type AnyDb = SqliteDb | PgDb
+
+export type BackendConfig =
+  | { dialect: 'sqlite'; path: string }
+  | { dialect: 'postgres'; dsn: string }
 
 export interface DatabaseHandle {
-  /** Drizzle query interface used by repositories. */
-  db: ChronosDb
-  /** Raw better-sqlite3 handle (pragmas, checkpoint, migrations). */
-  sqlite: Database.Database
-  /** Run a passive WAL checkpoint (call when the GUI opens / periodically). */
+  dialect: 'sqlite' | 'postgres'
+  /** Drizzle query interface (dialect-specific concrete type narrowed by `dialect`). */
+  db: AnyDb
+  /** Raw better-sqlite3 handle — present only for sqlite (pragmas, checkpoint, migrations). */
+  sqlite?: Database.Database
+  /** node-postgres pool — present only for postgres. */
+  pool?: Pool
+  /** Passive WAL checkpoint (sqlite only; no-op for postgres). */
   checkpoint: () => void
-  /** Close the underlying connection. */
-  close: () => void
+  /** Close the underlying connection (async: pg pool.end()). */
+  close: () => Promise<void>
+}
+
+function normalize(config: BackendConfig | string): BackendConfig {
+  return typeof config === 'string' ? { dialect: 'sqlite', path: config } : config
 }
 
 /**
- * Open a ChronosUI database. `path` is injected by the caller: Electron passes
- * `join(app.getPath('userData'), 'chronos.db')` (Plan 5); tests pass ':memory:' or a temp file.
- * Pragmas (WAL, busy_timeout, foreign_keys, journal_size_limit, synchronous) are configured here
- * for multi-process safety (the GUI and schedmgr both write). See spec §7.
+ * Open a ChronosUI database. SQLite is the default backend (zero-config; a path string or
+ * `{ dialect: 'sqlite', path }`). PostgreSQL (`{ dialect: 'postgres', dsn }`) opens a `pg.Pool`.
+ * SQLite pragmas (WAL, busy_timeout, foreign_keys, journal_size_limit, synchronous) are for
+ * multi-process safety (the GUI and schedmgr both write). See spec §7 + the v1.1 PostgreSQL design.
  */
-export function createDatabase(path: string): DatabaseHandle {
-  const sqlite = new Database(path)
+export function createDatabase(config: BackendConfig | string): DatabaseHandle {
+  const cfg = normalize(config)
+  if (cfg.dialect === 'postgres') {
+    const pool = new Pool({ connectionString: cfg.dsn })
+    const db = drizzlePg(pool, { schema: pgSchema })
+    return {
+      dialect: 'postgres',
+      db,
+      pool,
+      checkpoint: () => {},
+      close: () => pool.end()
+    }
+  }
+  const sqlite = new Database(cfg.path)
   sqlite.pragma('journal_mode = WAL')
   sqlite.pragma('busy_timeout = 5000')
   sqlite.pragma('foreign_keys = ON')
   sqlite.pragma('synchronous = NORMAL')
   // Bound WAL growth: many short-lived schedmgr writers rarely auto-checkpoint (spec §7).
   sqlite.pragma('journal_size_limit = 6291456') // 6 MiB
-  const db = drizzle(sqlite, { schema })
+  const db = drizzleSqlite(sqlite, { schema: sqliteSchema })
   return {
+    dialect: 'sqlite',
     db,
     sqlite,
     checkpoint: () => {
       sqlite.pragma('wal_checkpoint(PASSIVE)')
     },
-    close: () => sqlite.close()
+    close: () => {
+      sqlite.close()
+      return Promise.resolve()
+    }
   }
 }

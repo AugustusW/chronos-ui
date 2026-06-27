@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, it, expect } from 'vitest'
-import { resolveDbPath, resolveMigrationsPath } from '../../src/main/db/paths'
+import { resolveDbPath, resolveMigrationsPaths } from '../../src/main/db/paths'
 import { sep } from 'node:path'
 
 // The impl uses path.join (\ on Windows), so normalize the result to / for platform-agnostic assertions.
@@ -20,19 +20,21 @@ describe('resolveDbPath', () => {
   })
 })
 
-describe('resolveMigrationsPath', () => {
-  it('dev (unpackaged) resolves under out/main/migrations', () => {
-    const p = resolveMigrationsPath(fakeApp({ isPackaged: false }), {
+describe('resolveMigrationsPaths', () => {
+  it('dev (unpackaged) resolves both dialect folders under out/main', () => {
+    const p = resolveMigrationsPaths(fakeApp({ isPackaged: false }), {
       appRoot: '/proj/chronos-ui',
       resourcesPath: '/ignored'
     })
-    expect(norm(p)).toBe('/proj/chronos-ui/out/main/migrations')
+    expect(norm(p.sqlite)).toBe('/proj/chronos-ui/out/main/migrations')
+    expect(norm(p.pg)).toBe('/proj/chronos-ui/out/main/migrations.pg')
   })
-  it('prod (packaged) resolves under resourcesPath asar.unpacked', () => {
-    const p = resolveMigrationsPath(fakeApp({ isPackaged: true }), {
+  it('prod (packaged) resolves both under resourcesPath asar.unpacked', () => {
+    const p = resolveMigrationsPaths(fakeApp({ isPackaged: true }), {
       appRoot: '/ignored',
       resourcesPath: '/app/Contents/Resources'
     })
-    expect(norm(p)).toBe('/app/Contents/Resources/app.asar.unpacked/out/main/migrations')
+    expect(norm(p.sqlite)).toBe('/app/Contents/Resources/app.asar.unpacked/out/main/migrations')
+    expect(norm(p.pg)).toBe('/app/Contents/Resources/app.asar.unpacked/out/main/migrations.pg')
   })
 })

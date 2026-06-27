@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { reactive, computed } from 'vue'
 import type { JobListItem, ReconcileResult, RunEvent } from '../../../shared/ipc-contract'
+import { schedulerLabel, hostPlatform } from '../lib/scheduler-label'
 
 /** Maximum number of finished-run buffers retained in liveOutput. Running runs are never evicted. */
 const LIVE_OUTPUT_MAX = 50
@@ -13,12 +14,24 @@ export function createScheduleStore() {
     selectMode: false,
     selectedIds: new Set<number>(),
     runningRuns: new Map<number, number>(), // jobId → runId
-    liveOutput: new Map<number, { stdout: string; stderr: string }>() // runId → { stdout, stderr }
+    liveOutput: new Map<number, { stdout: string; stderr: string }>(), // runId → { stdout, stderr }
+    loading: false, // a scan/refresh is in flight
+    scanError: null as string | null, // last scan error, surfaced in the UI (never swallowed)
+    hasScanned: false // a scan has completed at least once (distinguishes "never scanned" from "empty")
   })
 
   async function refresh(): Promise<void> {
-    const r: ReconcileResult = await window.chronos.listJobs()
-    state.items = r.items
+    state.loading = true
+    state.scanError = null
+    try {
+      const r: ReconcileResult = await window.chronos.listJobs()
+      state.items = r.items
+      state.hasScanned = true
+    } catch (err) {
+      state.scanError = err instanceof Error ? err.message : 'Scan failed'
+    } finally {
+      state.loading = false
+    }
   }
   const categories = computed<string[]>(() => {
     const set = new Set<string>()
@@ -28,7 +41,9 @@ export function createScheduleStore() {
   const visibleGroups = computed(() => {
     const groups = new Map<string, JobListItem[]>()
     for (const it of state.items) {
-      const cat = it.status === 'unmanaged' ? 'found in crontab' : it.job?.category ?? 'uncategorized'
+      const cat = it.status === 'unmanaged'
+        ? `found in ${schedulerLabel(hostPlatform())}`
+        : it.job?.category ?? 'uncategorized'
       if (state.categoryFilter !== 'All' && cat !== state.categoryFilter) continue
       ;(groups.get(cat) ?? groups.set(cat, []).get(cat)!).push(it)
     }
@@ -69,6 +84,9 @@ export function createScheduleStore() {
     get selectedIds() { return state.selectedIds },
     get runningRuns() { return state.runningRuns },
     get liveOutput() { return state.liveOutput },
+    get loading() { return state.loading },
+    get scanError() { return state.scanError },
+    get hasScanned() { return state.hasScanned },
     categories, visibleGroups,
     refresh, setCategory, toggleSelect, applyRunEvent
   })

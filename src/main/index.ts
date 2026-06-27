@@ -1,12 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
-import { app, BrowserWindow } from 'electron'
+import { app, BrowserWindow, dialog } from 'electron'
 import { join } from 'path'
+import { installCrashGuards } from './crash-guards'
 import { buildMainDeps } from './bootstrap'
 import { registerIpcHandlers } from './ipc'
 import { startCheckpointTimer } from './db/lifecycle'
 import { watchDbForChanges } from './db/watch'
 import type { DatabaseHandle } from './db/client'
 import { createTray, type TrayHandle } from './tray'
+
+// Install crash guards as early as possible: a stray uncaught error in main must surface a visible,
+// debuggable dialog (ChronosUI is a developer tool) rather than silently quitting the app.
+installCrashGuards({ process, app, showError: (title, content) => dialog.showErrorBox(title, content) })
 
 let dbHandle: DatabaseHandle | null = null
 let stopCheckpoint: (() => void) | null = null
@@ -35,8 +40,8 @@ function createWindow(): void {
   else win.loadFile(join(__dirname, '../renderer/index.html'))
 }
 
-app.whenReady().then(() => {
-  const built = buildMainDeps(app, { getWebContents: () => BrowserWindow.getAllWindows()[0]?.webContents })
+app.whenReady().then(async () => {
+  const built = await buildMainDeps(app, { getWebContents: () => BrowserWindow.getAllWindows()[0]?.webContents })
   dbHandle = built.handle
   dbHandle.checkpoint() // passive checkpoint on open (spec §7)
   stopCheckpoint = startCheckpointTimer(dbHandle)
@@ -46,7 +51,9 @@ app.whenReady().then(() => {
   tray = createTray({
     onOpen: showWin,
     onQuit: () => { isQuitting = true; app.quit() },
-    iconPath: app.isPackaged ? join(process.resourcesPath, 'icon.png') : join(__dirname, '../../build/icon.png')
+    // Monochrome menu-bar template (#5): the "…Template" filename makes Electron auto-render it for
+    // light/dark menu bars. NOT the full color app icon (which renders oversized + wrong in the tray).
+    iconPath: app.isPackaged ? join(process.resourcesPath, 'trayTemplate.png') : join(__dirname, '../../build/trayTemplate.png')
   })
   stopWatch = watchDbForChanges(built.dbPath, () => built.emit({ kind: 'jobsChanged' }))
   poll = setInterval(() => built.emit({ kind: 'jobsChanged' }), 45_000)
@@ -62,7 +69,10 @@ app.on('before-quit', () => {
   stopWatch?.()
   if (poll) clearInterval(poll)
   dbHandle?.checkpoint()
-  dbHandle?.close()
+  // SQLite close() is synchronous internally (resolved promise), so this completes during quit.
+  // Plan 3 (postgres backend) will need the e.preventDefault()+app.quit() pattern to truly await
+  // pool.end() before exiting; for the sqlite default the floating promise is intentional.
+  void dbHandle?.close()
 })
 
 app.on('window-all-closed', () => {

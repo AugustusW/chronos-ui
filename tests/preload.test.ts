@@ -41,4 +41,11 @@ describe('preload chronos api', () => {
     expect(removeListener).toHaveBeenCalledOnce()
     expect(removeListener.mock.calls[0][1]).toBe(registeredH)
   })
+
+  it('exposes platform as a string for platform-aware UI (#3)', async () => {
+    await import('../src/preload/index')
+    const api = exposed.chronos as Record<string, unknown>
+    expect(typeof api.platform).toBe('string')
+    expect(api.platform).toBe(process.platform)
+  })
 })

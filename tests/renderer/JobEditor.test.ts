@@ -3,6 +3,8 @@
 import { describe, it, expect } from 'vitest'
 import { nextTick } from 'vue'
 import { mount, flushPromises } from '@vue/test-utils'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import JobEditor from '../../src/renderer/src/components/JobEditor.vue'
 describe('JobEditor', () => {
   it('emits save with the form values', async () => {
@@ -56,5 +58,11 @@ describe('JobEditor', () => {
     await nextTick()
     expect((w.find('[data-f="name"]').element as HTMLInputElement).value).toBe('')
     expect((w.find('[data-f="command"]').element as HTMLTextAreaElement).value).toBe('')
+  })
+
+  it('overlay declares a z-index so it sits above background decorations (#4)', () => {
+    const src = readFileSync(resolve(__dirname, '../../src/renderer/src/components/JobEditor.vue'), 'utf8')
+    const overlayRule = src.match(/\.overlay\s*\{[^}]*\}/)?.[0] ?? ''
+    expect(overlayRule).toMatch(/z-index:\s*\d+/)
   })
 })

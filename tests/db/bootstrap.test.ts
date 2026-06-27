@@ -2,15 +2,21 @@
 import { describe, it, expect } from 'vitest'
 import { createDatabase } from '../../src/main/db/client'
 import { runMigrations } from '../../src/main/db/migrate'
+import { fileURLToPath } from 'node:url'
+
+const MIGRATIONS = fileURLToPath(new URL('../../src/main/db/migrations', import.meta.url))
+const PG_MIGRATIONS = fileURLToPath(new URL('../../src/main/db/migrations.pg', import.meta.url))
 
 function tableColumns(sqlite: import('better-sqlite3').Database, table: string): string[] {
   return (sqlite.pragma(`table_info(${table})`) as Array<{ name: string }>).map((c) => c.name)
 }
 
 describe('db bootstrap', () => {
-  it('creates jobs and run_logs tables via migrations', () => {
-    const { sqlite, close } = createDatabase(':memory:')
-    runMigrations(sqlite)
+  it('creates jobs and run_logs tables via migrations', async () => {
+    const handle = createDatabase(':memory:')
+    await runMigrations(handle, { sqlite: MIGRATIONS, pg: PG_MIGRATIONS })
+    const sqlite = handle.sqlite!
+    const close = handle.close
     const tables = (
       sqlite
         .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
@@ -27,6 +33,6 @@ describe('db bootstrap', () => {
     for (const c of ['id', 'jobId', 'triggeredBy', 'result', 'startedAt', 'endedAt', 'durationMs', 'exitCode', 'stdout', 'stderr', 'createdAt']) {
       expect(runCols, `run_logs.${c}`).toContain(c)
     }
-    close()
+    await close()
   })
 })

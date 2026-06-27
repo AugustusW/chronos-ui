@@ -39,4 +39,25 @@ describe('OutputTerminal', () => {
     expect(w.text()).toContain('ok')
     expect(w.text()).not.toContain('\x1b')
   })
+
+  it('shows a "(no output)" hint when the tab is empty and not streaming (#7)', () => {
+    const w = mount(OutputTerminal, { props: { stdout: '', stderr: '' } })
+    expect(w.text()).toMatch(/no output/i)
+  })
+
+  it('explains empty output when the command redirects to a file (#7)', () => {
+    const w = mount(OutputTerminal, { props: { stdout: '', stderr: '', command: 'python run.py >> /var/log/x.log 2>&1' } })
+    expect(w.text()).toMatch(/redirect/i)
+  })
+
+  it('does NOT show the hint while streaming (output may still arrive) (#7)', () => {
+    const w = mount(OutputTerminal, { props: { stdout: '', stderr: '', live: true } })
+    expect(w.text()).not.toMatch(/no output/i)
+  })
+
+  it('does NOT show the hint when there is output (#7)', () => {
+    const w = mount(OutputTerminal, { props: { stdout: 'real output', stderr: '' } })
+    expect(w.text()).toContain('real output')
+    expect(w.text()).not.toMatch(/no output/i)
+  })
 })

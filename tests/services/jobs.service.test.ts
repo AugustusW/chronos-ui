@@ -1,12 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, it, expect } from 'vitest'
-import { openAndMigrate } from '../../src/main/db/lifecycle'
+import { makeTestDb } from '../db/helpers'
+import { createRepositories } from '../../src/main/db/repositories'
 import { getJob, listJobs } from '../../src/main/db/jobs.repository'
 import { createJobsService } from '../../src/main/services/jobs.service'
 import type { SchedulerAdapter, WriteResult, ParsedJob } from '../../src/main/scheduler/types'
-import { fileURLToPath } from 'node:url'
-
-const MIGRATIONS = fileURLToPath(new URL('../../src/main/db/migrations', import.meta.url))
 
 function fakeAdapter(over: Partial<SchedulerAdapter> = {}): SchedulerAdapter {
   const ok = async (): Promise<WriteResult> => ({ ok: true })
@@ -18,8 +16,9 @@ function fakeAdapter(over: Partial<SchedulerAdapter> = {}): SchedulerAdapter {
 }
 
 function svc(adapter: SchedulerAdapter) {
-  const h = openAndMigrate(':memory:', MIGRATIONS)
-  return { h, service: createJobsService({ db: h.db, adapter, platform: 'darwin', schedmgrPath: '/opt/schedmgr', dbPath: ':memory:' }) }
+  const h = makeTestDb()
+  const repos = createRepositories(h)
+  return { h, service: createJobsService({ repos, adapter, platform: 'darwin', schedmgrPath: '/opt/schedmgr', dbPath: ':memory:' }) }
 }
 
 describe('jobs.service create', () => {
@@ -93,6 +92,20 @@ describe('jobs.service adopt', () => {
     expect(listJobs(h.db)).toHaveLength(1) // only the adopted one survives
     h.close()
   })
+
+  it('defaults the adopted name to blank (not the command) when the native entry has no name — cron (#8)', async () => {
+    const { h, service } = svc(fakeAdapter({ adoptMany: async (specs) => ({ ok: true, adopted: specs.map((s) => s.chronosId) }) }))
+    await service.adopt([{ scheduleExpr: '0 3 * * *', command: '/very/long/path/to/script.sh --flag >> /var/log/x.log 2>&1' }])
+    expect(listJobs(h.db)[0].name).toBe('') // blank — user names it; NOT the command
+    h.close()
+  })
+
+  it('uses the native name as the adopted name when present — Windows Task Scheduler (#8)', async () => {
+    const { h, service } = svc(fakeAdapter({ adoptMany: async (specs) => ({ ok: true, adopted: specs.map((s) => s.chronosId) }) }))
+    await service.adopt([{ name: 'BackupJob', scheduleExpr: '0 3 * * *', command: 'C:\\backup\\run.exe' }])
+    expect(listJobs(h.db)[0].name).toBe('BackupJob')
+    h.close()
+  })
 })
 
 describe('jobs.service unadopt', () => {
@@ -119,6 +132,59 @@ describe('jobs.service list', () => {
     const { h, service } = svc(fakeAdapter({ list: async () => native }))
     const r = await service.list()
     expect(r.items[0].status).toBe('unmanaged')
+    h.close()
+  })
+})
+
+describe('jobs.service update', () => {
+  // Mimics the crontab adapter's guard: an adopted (schedmgr-wrapped) job rejects any update
+  // that carries a `command` ("cannot change an adopted job's command"). Records its calls so
+  // we can assert the service only reaches the native scheduler when schedule/command change.
+  function adoptedGuardAdapter(): { adapter: SchedulerAdapter; calls: Array<{ scheduleExpr?: string; command?: string }> } {
+    const calls: Array<{ scheduleExpr?: string; command?: string }> = []
+    const adapter = fakeAdapter({
+      updateJob: async (_id, changes) => {
+        calls.push(changes)
+        if (changes.command !== undefined) {
+          return { ok: false, reason: 'error', error: 'cannot change command of an adopted job; unadopt then adopt' }
+        }
+        return { ok: true }
+      }
+    })
+    return { adapter, calls }
+  }
+
+  it('persists a name-only edit without touching the native scheduler (adopted jobs stay renamable)', async () => {
+    const { adapter, calls } = adoptedGuardAdapter()
+    const { h, service } = svc(adapter)
+    const created = await service.create({ name: 'orig', scheduleExpr: '0 3 * * *', command: '/b.sh' })
+    const r = await service.update(created.job!.id, { name: 'Renamed', scheduleExpr: '0 3 * * *', command: '/b.sh' })
+    expect(r.ok).toBe(true)
+    expect(getJob(h.db, created.job!.id)?.name).toBe('Renamed')
+    expect(calls).toEqual([]) // schedule + command unchanged → the adapter must not be called
+    h.close()
+  })
+
+  it('forwards only the changed schedule (not the unchanged command) so a schedule edit on an adopted job succeeds', async () => {
+    const { adapter, calls } = adoptedGuardAdapter()
+    const { h, service } = svc(adapter)
+    const created = await service.create({ name: 'orig', scheduleExpr: '0 3 * * *', command: '/b.sh' })
+    const r = await service.update(created.job!.id, { name: 'orig', scheduleExpr: '0 4 * * *', command: '/b.sh' })
+    expect(r.ok).toBe(true)
+    expect(calls).toHaveLength(1)
+    expect(calls[0].scheduleExpr).toBe('0 4 * * *')
+    expect(calls[0].command).toBeUndefined() // unchanged command not re-sent → adopted guard not tripped
+    expect(getJob(h.db, created.job!.id)?.scheduleExpr).toBe('0 4 * * *')
+    h.close()
+  })
+
+  it('still rejects a genuine command change on an adopted job (guard preserved, DB unchanged)', async () => {
+    const { adapter } = adoptedGuardAdapter()
+    const { h, service } = svc(adapter)
+    const created = await service.create({ name: 'orig', scheduleExpr: '0 3 * * *', command: '/b.sh' })
+    const r = await service.update(created.job!.id, { name: 'orig', scheduleExpr: '0 3 * * *', command: '/CHANGED.sh' })
+    expect(r.ok).toBe(false)
+    expect(getJob(h.db, created.job!.id)?.command).toBe('/b.sh')
     h.close()
   })
 })

@@ -73,6 +73,7 @@ describe('TaskSchedulerAdapter.list', () => {
     expect(adopted.scheduleExpr).toBe('daily 03:00') // from stashed descriptor, not CIM
     expect(adopted.scheduleExprFormat).toBe('win-trigger')
     expect(adopted.command).toBe('echo hi && date') // unwrapped from after `--`
+    expect(adopted.name).toBe('chronos-42') // #8: managed Windows task also carries its real TaskName
 
     const unadopted = jobs.find((j) => j.chronosId === 7)!
     expect(unadopted.adopted).toBe(false)
@@ -84,6 +85,7 @@ describe('TaskSchedulerAdapter.list', () => {
     expect(external.canAdopt).toBe(true) // single exec action
     expect(external.scheduleExpr).toBe('weekly MON 09:00') // best-effort CIM read-back
     expect(external.command).toBe('C:\\backup\\run.exe --full')
+    expect(external.name).toBe('BackupJob') // #8: unmanaged Windows task carries its real Task Scheduler name
   })
 
   it('tolerates a single-task bare object (ConvertTo-Json array collapse)', async () => {

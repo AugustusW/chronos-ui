@@ -4,22 +4,25 @@
 // The App.vue component test stubs `window.chronos`, so it deliberately bypasses the
 // real Electron preload bridge — it cannot catch a packaging mismatch between the
 // preload path the main process references and the file electron-vite actually emits,
-// nor an ESM/sandbox incompatibility. Against the real build artifacts (built once by
-// tests/global-setup.ts), this verifies that:
+// nor an ESM/sandbox incompatibility. This test builds the app and verifies, against
+// the real build artifacts, that:
 //   1. the preload file the built main process references actually exists, and
 //   2. that preload is CommonJS (Electron sandboxed preload scripts cannot be ESM),
 //      which is required because the app enables `sandbox: true`.
-//
-// This spec only reads the shared out/ tree. It used to run its own `electron-vite
-// build` in a beforeAll, which raced with build-migrations on out/ under vitest's
-// parallel test files — flaky, and far more often on Windows where I/O is slower.
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, beforeAll } from 'vitest'
+import { execSync } from 'node:child_process'
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const outDir = resolve(projectRoot, 'out')
+
+beforeAll(() => {
+  // Self-contained: build so this test is independent of CI step ordering
+  // (CI runs the test step before the build step).
+  execSync('npx electron-vite build', { cwd: projectRoot, stdio: 'inherit' })
+}, 180_000)
 
 function readMainBundle(): string {
   const mainDir = resolve(outDir, 'main')

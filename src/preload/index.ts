@@ -6,6 +6,7 @@ import type {
 } from '../shared/ipc-contract'
 
 const api = {
+  platform: process.platform,
   getVersion: (): Promise<AppVersion> => ipcRenderer.invoke(IPC.appGetVersion),
   listJobs: (): Promise<ReconcileResult> => ipcRenderer.invoke(IPC.jobsList),
   reconcile: (): Promise<ReconcileResult> => ipcRenderer.invoke(IPC.jobsReconcile),

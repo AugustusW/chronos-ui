@@ -1,11 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
-import { createDatabase, type DatabaseHandle } from './client'
+import { createDatabase, type BackendConfig, type DatabaseHandle } from './client'
 import { runMigrations } from './migrate'
 
-/** Open the DB and bring its schema up to date (Drizzle migrate is idempotent — architect Q5). */
-export function openAndMigrate(dbPath: string, migrationsPath: string): DatabaseHandle {
-  const handle = createDatabase(dbPath)
-  runMigrations(handle.sqlite, migrationsPath)
+/**
+ * Open the DB for the given backend and bring its schema up to date (Drizzle migrate is
+ * idempotent — architect Q5). `paths` provides both per-dialect migration folders; the active
+ * dialect's set is applied. Async because the PostgreSQL migrator is async.
+ */
+export async function openAndMigrate(
+  config: BackendConfig,
+  paths: { sqlite: string; pg: string }
+): Promise<DatabaseHandle> {
+  const handle = createDatabase(config)
+  await runMigrations(handle, paths)
   return handle
 }
 

@@ -157,6 +157,23 @@ describe('SchedulesView', () => {
     expect(listJobs.mock.calls.length).toBe(listCallsBefore)
   })
 
+  it('keeps the editor open and surfaces the error when createJob returns { ok: false }', async () => {
+    listJobs.mockResolvedValue({ items: [], generatedAt: 0 })
+    createJob.mockResolvedValueOnce({ ok: false, error: 'native write failed' })
+    const w = mount(SchedulesView)
+    await flushPromises()
+    w.findComponent({ name: 'EmptyState' }).vm.$emit('new')
+    await flushPromises()
+    const listCallsBefore = listJobs.mock.calls.length
+    const input = { name: 'New', scheduleExpr: '0 3 * * *', command: '/n.sh' }
+    w.findComponent({ name: 'JobEditor' }).vm.$emit('save', input)
+    await flushPromises()
+    // Structured {ok:false} (not a thrown error) must also be surfaced, not silently swallowed.
+    expect(w.findComponent({ name: 'JobEditor' }).props('open')).toBe(true)
+    expect(w.text()).toContain('native write failed')
+    expect(listJobs.mock.calls.length).toBe(listCallsBefore)
+  })
+
   // Plan 6 FU1: per-row edit (managed) + adopt (unmanaged)
   describe('per-row edit + adopt', () => {
     it('JobRow @edit opens the editor with initial set to the job fields', async () => {
@@ -196,6 +213,25 @@ describe('SchedulesView', () => {
       expect(createJob).not.toHaveBeenCalled()
       expect(listJobs.mock.calls.length).toBeGreaterThan(listCallsBefore)
       expect(w.findComponent({ name: 'JobEditor' }).props('open')).toBe(false)
+    })
+
+    it('keeps the editor open and surfaces the error when updateJob returns { ok: false }', async () => {
+      listJobs.mockResolvedValue(MIXED_RESPONSE)
+      updateJob.mockResolvedValueOnce({ ok: false, error: 'cannot change command of an adopted job; unadopt then adopt' })
+      const w = mount(SchedulesView)
+      await flushPromises()
+      const managedRow = w.findAllComponents({ name: 'JobRow' }).find((r) => r.props('item').status === 'in_sync')!
+      managedRow.vm.$emit('edit')
+      await flushPromises()
+      const listCallsBefore = listJobs.mock.calls.length
+      const input = { name: 'Renamed', scheduleExpr: '0 2 * * *', command: '/m.sh' }
+      w.findComponent({ name: 'JobEditor' }).vm.$emit('save', input)
+      await flushPromises()
+      // The mock stands in for any server-side rejection (adopted-command guard, drift, etc.):
+      // a rejected write must not be swallowed — editor stays open, error shown, no refresh.
+      expect(w.findComponent({ name: 'JobEditor' }).props('open')).toBe(true)
+      expect(w.text()).toContain('cannot change command of an adopted job')
+      expect(listJobs.mock.calls.length).toBe(listCallsBefore)
     })
 
     it('JobRow @adopt for an unmanaged row calls adoptJobs + refreshes', async () => {

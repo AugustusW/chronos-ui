@@ -142,7 +142,8 @@ ConvertTo-Json -InputObject @($out) -Depth 8 -Compress
         scheduleExprFormat: 'win-trigger',
         command: adopted ? originalFromAdopted(action.Arguments ?? '') : commandFromCmdC(action.Arguments),
         adopted,
-        enabled
+        enabled,
+        name: t.TaskName // #8
       }
     }
     // Unmanaged external task: read-only adoption candidate.
@@ -157,7 +158,8 @@ ConvertTo-Json -InputObject @($out) -Depth 8 -Compress
       adopted: false,
       enabled,
       canAdopt,
-      scheduleLossy: desc.lossy
+      scheduleLossy: desc.lossy,
+      name: t.TaskName // #8: surface the real Task Scheduler name for unmanaged tasks
     }
   }
 

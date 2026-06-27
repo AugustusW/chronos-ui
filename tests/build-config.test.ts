@@ -22,8 +22,10 @@ describe('electron-builder config', () => {
   it('bundles schedmgr into the schedmgr/ subdir (architect C1)', () => {
     expect(JSON.stringify(b.extraResources)).toContain('"to":"schedmgr"')
   })
-  it('bundles the tray icon.png to the resources root (packaged tray icon path)', () => {
-    expect(JSON.stringify(b.extraResources)).toContain('icon.png')
+  it('bundles the monochrome tray template to the resources root (packaged tray icon path) (#5)', () => {
+    const er = JSON.stringify(b.extraResources)
+    expect(er).toContain('trayTemplate.png')
+    expect(er).toContain('trayTemplate@2x.png')
   })
   it('asar-unpacks better-sqlite3 AND the migrations (architect C2/I1)', () => {
     const unpack = JSON.stringify(b.asarUnpack ?? [])
@@ -38,6 +40,10 @@ describe('electron-builder config', () => {
   it('icon assets exist (plan-advisor I-3)', () => {
     expect(existsSync(join(__dirname, '../build/icon.icns'))).toBe(true)
     expect(existsSync(join(__dirname, '../build/icon.ico'))).toBe(true)
+  })
+  it('monochrome tray template assets exist (#5)', () => {
+    expect(existsSync(join(__dirname, '../build/trayTemplate.png'))).toBe(true)
+    expect(existsSync(join(__dirname, '../build/trayTemplate@2x.png'))).toBe(true)
   })
 })
 

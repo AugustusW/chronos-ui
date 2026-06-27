@@ -6,7 +6,6 @@ import StatusDot from './StatusDot.vue'
 import ScheduleChip from './ScheduleChip.vue'
 const props = defineProps<{ item: JobListItem; selectMode: boolean; selected: boolean; running: boolean }>()
 const emit = defineEmits<{ run: []; 'toggle-select': []; edit: []; adopt: []; 'open-detail': [] }>()
-const j = (): NonNullable<JobListItem['job']> => props.item.job!
 const dotStatus = (): 'ok' | 'fail' | 'warn' | 'off' | 'running' => {
   if (props.running) return 'running'
   if (props.item.status === 'unmanaged') return 'off'
@@ -23,7 +22,7 @@ const chipLabel = (): string => (chipKind() === 'wrapped' ? 'wrapped' : chipKind
     <input v-if="selectMode" type="checkbox" :checked="selected" aria-label="select job" @change="emit('toggle-select')" />
     <StatusDot :status="dotStatus()" />
     <div class="meta" data-detail role="button" tabindex="0" @click="emit('open-detail')" @keydown.enter="emit('open-detail')" @keydown.space.prevent="emit('open-detail')">
-      <div class="name">{{ item.status === 'unmanaged' ? item.native?.command : j().name }}
+      <div class="name">{{ item.job?.name ?? item.native?.name ?? '' }}
         <ScheduleChip :kind="chipKind()" :label="chipLabel()" />
       </div>
       <div class="cmd">{{ item.job?.command ?? item.native?.command }}</div>

@@ -1,25 +1,24 @@
 // SPDX-License-Identifier: Apache-2.0
-import Database from 'better-sqlite3'
-import { drizzle } from 'drizzle-orm/better-sqlite3'
-import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
-import { fileURLToPath } from 'node:url'
-
-// Migrations live next to this module. For dev + tests, resolve relative to the source file.
-// ⚠️ Plan 5/7 MUST REPLACE this default (not merely add an import): once electron-vite bundles
-// the main process, and especially inside a packaged `.asar`, `import.meta.url` no longer points
-// at a real migrations/ dir. The folder must be shipped via electron-builder `asarUnpack` and
-// resolved from `process.resourcesPath` (e.g. join(process.resourcesPath, 'app.asar.unpacked',
-// 'out/main/migrations')). Tracked as a Plan 5/7 task.
-const DEFAULT_MIGRATIONS_FOLDER = fileURLToPath(new URL('./migrations', import.meta.url))
+import { migrate as migrateSqlite } from 'drizzle-orm/better-sqlite3/migrator'
+import { migrate as migratePg } from 'drizzle-orm/node-postgres/migrator'
+import type { DatabaseHandle, SqliteDb, PgDb } from './client'
 
 /**
- * Apply all pending migrations. Accepts a raw better-sqlite3 handle. `migrationsFolder` is
- * injectable for tests.
+ * Apply pending migrations for the handle's dialect. SQLite uses the better-sqlite3 migrator
+ * (synchronous); PostgreSQL uses the node-postgres migrator (async). `paths` carries both
+ * per-dialect migration folders (resolveMigrationsPaths); only the active dialect's set runs.
+ *
+ * The folders are bundled into out/main/{migrations,migrations.pg} by electron-vite and, in a
+ * packaged build, shipped via electron-builder `asarUnpack` + resolved from process.resourcesPath
+ * (see resolveMigrationsPaths in paths.ts).
  */
-export function runMigrations(
-  sqlite: Database.Database,
-  migrationsFolder: string = DEFAULT_MIGRATIONS_FOLDER
-): void {
-  const db = drizzle(sqlite)
-  migrate(db, { migrationsFolder })
+export async function runMigrations(
+  handle: DatabaseHandle,
+  paths: { sqlite: string; pg: string }
+): Promise<void> {
+  if (handle.dialect === 'postgres') {
+    await migratePg(handle.db as PgDb, { migrationsFolder: paths.pg })
+    return
+  }
+  migrateSqlite(handle.db as SqliteDb, { migrationsFolder: paths.sqlite })
 }

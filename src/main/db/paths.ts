@@ -12,15 +12,16 @@ export function resolveDbPath(app: AppPaths): string {
 }
 
 /**
- * Resolve the Drizzle migrations folder (architect MEDIUM #4). `migrate.ts`'s `import.meta.url`
- * default breaks once electron-vite bundles main and packs it into `.asar`. Plan 5 injects this
- * explicitly; Plan 7 finalizes the prod asarUnpack wiring.
+ * Resolve BOTH per-dialect Drizzle migration folders (architect MEDIUM #4). The bundled location
+ * differs dev vs packaged: in a packaged build they ship via electron-builder `asarUnpack` under
+ * `process.resourcesPath`. The active dialect's folder is picked by `runMigrations`.
  */
-export function resolveMigrationsPath(
+export function resolveMigrationsPaths(
   app: AppPaths,
   ctx: { appRoot: string; resourcesPath: string }
-): string {
-  return app.isPackaged
-    ? join(ctx.resourcesPath, 'app.asar.unpacked', 'out/main/migrations')
-    : join(ctx.appRoot, 'out/main/migrations')
+): { sqlite: string; pg: string } {
+  const base = app.isPackaged
+    ? join(ctx.resourcesPath, 'app.asar.unpacked', 'out/main')
+    : join(ctx.appRoot, 'out/main')
+  return { sqlite: join(base, 'migrations'), pg: join(base, 'migrations.pg') }
 }

@@ -15,20 +15,21 @@ afterEach(() => {
 })
 
 describe('createDatabase', () => {
-  it('enables WAL and the safety pragmas on a file-backed db', () => {
+  it('enables WAL and the safety pragmas on a file-backed db', async () => {
     dir = mkdtempSync(join(tmpdir(), 'chronos-db-'))
     const { sqlite, close } = createDatabase(join(dir, 'chronos.db'))
-    expect(String(sqlite.pragma('journal_mode', { simple: true })).toLowerCase()).toBe('wal')
-    expect(Number(sqlite.pragma('busy_timeout', { simple: true }))).toBe(5000)
-    expect(Number(sqlite.pragma('foreign_keys', { simple: true }))).toBe(1)
-    expect(Number(sqlite.pragma('journal_size_limit', { simple: true }))).toBe(6291456)
-    close()
+    expect(sqlite).toBeDefined()
+    expect(String(sqlite!.pragma('journal_mode', { simple: true })).toLowerCase()).toBe('wal')
+    expect(Number(sqlite!.pragma('busy_timeout', { simple: true }))).toBe(5000)
+    expect(Number(sqlite!.pragma('foreign_keys', { simple: true }))).toBe(1)
+    expect(Number(sqlite!.pragma('journal_size_limit', { simple: true }))).toBe(6291456)
+    await close()
   })
 
-  it('runs a passive checkpoint without throwing and closes cleanly', () => {
+  it('runs a passive checkpoint without throwing and closes cleanly', async () => {
     dir = mkdtempSync(join(tmpdir(), 'chronos-db-'))
     const handle = createDatabase(join(dir, 'chronos.db'))
     expect(() => handle.checkpoint()).not.toThrow()
-    expect(() => handle.close()).not.toThrow()
+    await expect(handle.close()).resolves.toBeUndefined()
   })
 })

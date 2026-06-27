@@ -96,4 +96,33 @@ describe('schedule store', () => {
     // Map size must still be bounded (cap + 1 protected running run)
     expect(s.liveOutput.size).toBeLessThanOrEqual(51)
   })
+
+  it('refresh() toggles loading and records hasScanned (#2)', async () => {
+    listJobs.mockResolvedValue({ items: [], generatedAt: 0 })
+    const s = createScheduleStore()
+    expect(s.loading).toBe(false)
+    expect(s.hasScanned).toBe(false)
+    const p = s.refresh()
+    expect(s.loading).toBe(true)
+    await p
+    expect(s.loading).toBe(false)
+    expect(s.hasScanned).toBe(true)
+    expect(s.scanError).toBe(null)
+  })
+
+  it('refresh() captures scan errors instead of swallowing them (#2)', async () => {
+    listJobs.mockRejectedValue(new Error('crontab read failed'))
+    const s = createScheduleStore()
+    await s.refresh()
+    expect(s.scanError).toBe('crontab read failed')
+    expect(s.loading).toBe(false)
+  })
+
+  it('unmanaged jobs group header is platform-aware (#3)', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(globalThis as any).window = { chronos: { listJobs, platform: 'win32' } }
+    listJobs.mockResolvedValue({ items: [item({ status: 'unmanaged', job: undefined, native: { scheduleExpr: '0 1 * * *', command: 'c' } })], generatedAt: 0 })
+    const s = createScheduleStore(); await s.refresh()
+    expect(s.visibleGroups.map((g) => g.category)).toContain('found in Task Scheduler')
+  })
 })

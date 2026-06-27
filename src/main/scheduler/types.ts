@@ -17,6 +17,7 @@ export interface ParsedJob {
   enabled: boolean
   canAdopt?: boolean // architect D4: Windows — false for ≠1-action / non-exec / elevated external tasks; undefined ⇒ adoptable (crontab)
   scheduleLossy?: boolean // architect D3: scheduleExpr is a best-effort read-back of an unsupported trigger (display-only)
+  name?: string // #8: native name where the scheduler has one (Windows Task Scheduler TaskName). crontab has none → undefined.
 }
 
 export interface DriftResult {

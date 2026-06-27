@@ -17,6 +17,12 @@ export default defineConfig({
             // to know which SQL files to apply and in what order.
             src: 'src/main/db/migrations/**/*',
             dest: 'migrations'
+          },
+          {
+            // Postgres migration set (per-dialect). resolveMigrationsPaths() picks the
+            // matching folder at runtime based on the active backend.
+            src: 'src/main/db/migrations.pg/**/*',
+            dest: 'migrations.pg'
           }
         ]
       })

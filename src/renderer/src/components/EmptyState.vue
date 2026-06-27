@@ -1,6 +1,10 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 <script setup lang="ts">
+import { computed } from 'vue'
+import { schedulerLabel, hostPlatform } from '../lib/scheduler-label'
+defineProps<{ scanning: boolean; scanned: boolean }>()
 const emit = defineEmits<{ scan: []; new: [] }>()
+const label = computed(() => schedulerLabel(hostPlatform()))
 </script>
 <template>
   <div class="empty">
@@ -12,9 +16,12 @@ const emit = defineEmits<{ scan: []; new: [] }>()
       <circle cx="50" cy="50" r="3.4" fill="currentColor" stroke="none" />
     </svg>
     <h1>Bring order to your schedules</h1>
-    <p>ChronosUI reads the jobs already in your <b>native scheduler</b> — your crontab. Nothing is moved or migrated.</p>
+    <p>ChronosUI reads the jobs already in your <b>native scheduler</b> — your {{ label }}. Nothing is moved or migrated.</p>
+    <p v-if="scanned && !scanning" class="nojobs">No scheduled jobs found — your {{ label }} is empty.</p>
     <div class="cta">
-      <button class="btn primary" type="button" @click="emit('scan')">⟳ Scan crontab</button>
+      <button class="btn primary" type="button" :disabled="scanning" @click="emit('scan')">
+        {{ scanning ? 'Scanning…' : '⟳ Scan ' + label }}
+      </button>
       <button class="btn" type="button" @click="emit('new')">＋ New job</button>
     </div>
   </div>
@@ -23,7 +30,9 @@ const emit = defineEmits<{ scan: []; new: [] }>()
 .empty{max-width:460px;margin:auto;text-align:center;padding:40px}
 .bigdial{width:104px;height:104px;color:var(--color-primary);opacity:.92;margin-bottom:var(--p-space-4)}
 h1{font-size:22px;margin:0 0 8px}p{color:var(--color-text-muted);font-size:13px;line-height:1.6;margin:0 auto var(--p-space-4);max-width:400px}
+.nojobs{color:var(--color-text-muted);font-weight:500}
 .cta{display:flex;gap:10px;justify-content:center}
 .btn{border:1px solid var(--color-border);background:var(--color-surface);color:var(--color-text);border-radius:var(--p-radius);padding:9px 18px;font-size:13px;cursor:pointer}
 .btn.primary{background:var(--color-primary);color:var(--color-on-primary);border-color:transparent;font-weight:500}
+.btn:disabled{opacity:.6;cursor:default}
 </style>

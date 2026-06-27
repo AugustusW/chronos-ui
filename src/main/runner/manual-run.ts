@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { ChronosDb } from '../db/client'
-import { getJob } from '../db/jobs.repository'
-import { getLatestRun } from '../db/runLogs.repository'
+import type { JobsRepo, RunLogsRepo } from '../db/repositories'
 import type { RunNowResult, RunEvent } from '../../shared/ipc-contract'
 
 // Monotonic counter for synthetic live-event ids (NOT DB ids; keying only).
@@ -16,7 +14,8 @@ export interface ChildLike {
 export type SpawnLike = (cmd: string, args: string[]) => ChildLike
 
 export interface RunNowDeps {
-  db: ChronosDb
+  jobs: JobsRepo
+  runLogs: RunLogsRepo
   schedmgrPath: string
   dbPath: string
   spawn: SpawnLike
@@ -31,7 +30,7 @@ export interface RunNowDeps {
  * the IPC response. Command source is the DB `job.command` (architect HIGH #2).
  */
 export async function runNow(id: number, deps: RunNowDeps): Promise<RunNowResult> {
-  const job = getJob(deps.db, id)
+  const job = await deps.jobs.get(id)
   if (!job) throw new Error(`no job ${id}`) // unmanaged/unknown ids are rejected at the boundary
 
   const args = [
@@ -61,7 +60,7 @@ export async function runNow(id: number, deps: RunNowDeps): Promise<RunNowResult
   if (outcome.t === 'timeout') {
     return { status: 'ui_timeout', jobId: id, waitedMs: cap } // schedmgr left as a detached orphan; it records best-effort
   }
-  const run = getLatestRun(deps.db, id)
+  const run = await deps.runLogs.getLatest(id)
   if (!run) return { status: 'ui_timeout', jobId: id, waitedMs: cap } // schedmgr exited without a row (best-effort DB failure)
   return { status: 'completed', run }
 }
@@ -73,7 +72,7 @@ export interface StreamingChildLike extends ChildLike {
 export type SpawnStreamingLike = (cmd: string, args: string[]) => StreamingChildLike
 
 export interface RunStreamingDeps {
-  db: ChronosDb
+  jobs: JobsRepo
   schedmgrPath: string
   dbPath: string
   spawn: SpawnStreamingLike
@@ -91,7 +90,7 @@ export interface RunStreamingDeps {
  * This function writes NO DB row; events are keyed by a synthetic monotonic id (not a DB id).
  */
 export async function runNowStreaming(id: number, deps: RunStreamingDeps): Promise<void> {
-  const job = getJob(deps.db, id)
+  const job = await deps.jobs.get(id)
   if (!job) throw new Error(`no job ${id}`)
   const now = deps.now ?? (() => Date.now())
   // Use a synthetic id purely to key live events; it is NOT stored in run_logs.

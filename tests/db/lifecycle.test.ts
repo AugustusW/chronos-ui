@@ -5,12 +5,17 @@ import { listJobs } from '../../src/main/db/jobs.repository'
 import { fileURLToPath } from 'node:url'
 
 const MIGRATIONS = fileURLToPath(new URL('../../src/main/db/migrations', import.meta.url))
+const PG_MIGRATIONS = fileURLToPath(new URL('../../src/main/db/migrations.pg', import.meta.url))
 
 describe('openAndMigrate', () => {
-  it('opens an in-memory DB and applies migrations so repositories work', () => {
-    const h = openAndMigrate(':memory:', MIGRATIONS)
-    expect(listJobs(h.db)).toEqual([]) // table exists because migrations ran
-    h.close()
+  it('opens an in-memory sqlite DB and applies migrations so repositories work', async () => {
+    const h = await openAndMigrate(
+      { dialect: 'sqlite', path: ':memory:' },
+      { sqlite: MIGRATIONS, pg: PG_MIGRATIONS }
+    )
+    expect(h.dialect).toBe('sqlite')
+    expect(listJobs(h.db as never)).toEqual([]) // table exists because migrations ran
+    await h.close()
   })
 })
 

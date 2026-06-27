@@ -17,6 +17,8 @@ const loadError = ref<string | null>(null)
 
 // Synthetic runId if THIS job currently has a live run in progress
 const liveRunId = computed(() => store.runningRuns.get(Number(props.id)))
+// The job's command — lets OutputTerminal explain an empty pane when the command redirects output (#7)
+const jobCommand = computed(() => store.items.find((it) => it.job?.id === Number(props.id))?.job?.command)
 
 async function loadRuns(): Promise<void> {
   loading.value = true
@@ -80,6 +82,7 @@ const liveBuffer = computed(() => liveRunId.value !== undefined ? store.liveOutp
           :stdout="selected?.stdout ?? ''"
           :stderr="selected?.stderr ?? ''"
           :live="selected?.result == null"
+          :command="jobCommand"
         />
       </div>
     </template>

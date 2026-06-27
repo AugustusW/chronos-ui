@@ -1,6 +1,6 @@
 {
   "name": "chronos-ui",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Bring Order to Time — a cross-platform desktop GUI for managing native OS schedulers.",
   "license": "Apache-2.0",
   "author": "The ChronosUI Authors",
@@ -20,14 +20,18 @@
     "format": "prettier --write .",
     "test": "vitest run",
     "test:watch": "vitest",
+    "db:generate:sqlite": "drizzle-kit generate --config drizzle.config.sqlite.ts",
+    "db:generate:pg": "drizzle-kit generate --config drizzle.config.pg.ts",
     "stage:schedmgr": "node scripts/build-schedmgr.mjs",
-    "dist:mac": "npm run stage:schedmgr && npm run build && electron-builder --mac --arm64",
-    "dist:win": "npm run stage:schedmgr && npm run build && electron-builder --win --x64"
+    "dist:mac": "npm run stage:schedmgr && npm run build && npm run rebuild:native && electron-builder --mac --arm64",
+    "dist:win": "npm run stage:schedmgr && npm run build && npm run rebuild:native && electron-builder --win --x64",
+    "rebuild:native": "node scripts/rebuild-native.mjs"
   },
   "devDependencies": {
     "@electron/notarize": "^2.5.0",
     "@eslint/js": "^9.13.0",
     "@types/better-sqlite3": "^7.6.13",
+    "@types/pg": "^8.20.0",
     "@vitejs/plugin-vue": "^5.1.0",
     "@vue/test-utils": "^2.4.6",
     "drizzle-kit": "^0.28.1",
@@ -52,6 +56,7 @@
   "dependencies": {
     "better-sqlite3": "^11.10.0",
     "drizzle-orm": "^0.36.4",
+    "pg": "^8.22.0",
     "vue-router": "^4.6.4"
   },
   "build": {
@@ -67,7 +72,8 @@
     ],
     "asarUnpack": [
       "**/node_modules/better-sqlite3/**",
-      "out/main/migrations/**"
+      "out/main/migrations/**",
+      "out/main/migrations.pg/**"
     ],
     "extraResources": [
       {
@@ -81,6 +87,14 @@
       {
         "from": "build/icon.png",
         "to": "icon.png"
+      },
+      {
+        "from": "build/trayTemplate.png",
+        "to": "trayTemplate.png"
+      },
+      {
+        "from": "build/trayTemplate@2x.png",
+        "to": "trayTemplate@2x.png"
       }
     ],
     "publish": null,
@@ -111,14 +125,15 @@
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
       "artifactName": "ChronosUI-Setup-${version}.exe"
-    }
+    },
+    "npmRebuild": false
+  },
+  "overrides": {
+    "node-gyp": "^10.2.0"
   },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/AugustusW/chronos-ui.git"
-  },
-  "bugs": {
-    "url": "https://github.com/AugustusW/chronos-ui/issues"
   },
   "homepage": "https://github.com/AugustusW/chronos-ui#readme"
 }

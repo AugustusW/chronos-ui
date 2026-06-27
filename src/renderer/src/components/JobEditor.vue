@@ -40,7 +40,7 @@ watch(() => props.open, (isOpen) => {
   </div>
 </template>
 <style scoped>
-.overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);display:grid;place-items:center}
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);display:grid;place-items:center;z-index:100}
 .modal{width:560px;background:var(--color-surface);border:1px solid var(--color-border);border-radius:10px;overflow:hidden}
 header,footer{padding:var(--p-space-4);border-bottom:1px solid var(--color-border)}footer{border-bottom:0;border-top:1px solid var(--color-border);display:flex;justify-content:flex-end;gap:10px}
 h2{margin:0;font-size:15px}.body{padding:var(--p-space-4);display:flex;flex-direction:column;gap:var(--p-space-3)}

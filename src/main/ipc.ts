@@ -12,8 +12,8 @@ export interface IpcDeps {
   meta: { name: string; version: string }
   service: JobsService
   runNow: (id: number) => Promise<RunNowResult>
-  listRunsForJob: (jobId: number, limit?: number) => RunLog[]
-  recentRuns: (limit?: number) => RunLog[]
+  listRunsForJob: (jobId: number, limit?: number) => Promise<RunLog[]>
+  recentRuns: (limit?: number) => Promise<RunLog[]>
   runNowStreaming: (id: number) => Promise<void>
   cancelBatch: () => void
 }
@@ -102,13 +102,13 @@ export function handleJobsRunBatchCancel(deps: IpcDeps): void {
 export async function handleJobsList(deps: IpcDeps): Promise<ReconcileResult> {
   return deps.service.list()
 }
-export function handleRunsListForJob(deps: IpcDeps, payload: unknown): RunLog[] {
+export function handleRunsListForJob(deps: IpcDeps, payload: unknown): Promise<RunLog[]> {
   const p = payload as { jobId?: unknown; limit?: unknown }
-  if (!isPosInt(p?.jobId)) throw new Error('invalid jobId')
+  if (!isPosInt(p?.jobId)) throw new Error('invalid jobId') // sync throw at the boundary (kept non-async)
   const limit = isPosInt(p.limit) ? Math.min(p.limit, MAX_RUN_LIST_LIMIT) : undefined // cap (code review #5)
   return deps.listRunsForJob(p.jobId, limit)
 }
-export function handleRunsRecent(deps: IpcDeps, payload: unknown): RunLog[] {
+export function handleRunsRecent(deps: IpcDeps, payload: unknown): Promise<RunLog[]> {
   const p = payload as { limit?: unknown }
   const limit = isPosInt(p?.limit) ? Math.min(p.limit as number, MAX_RUN_LIST_LIMIT) : undefined
   return deps.recentRuns(limit)

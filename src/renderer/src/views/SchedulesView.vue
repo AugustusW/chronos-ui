@@ -88,10 +88,13 @@ function openEdit(job: Job): void {
 }
 async function onSave(input: CreateJobInput): Promise<void> {
   try {
-    if (editingId.value != null) {
-      await api.updateJob(editingId.value, input)
-    } else {
-      await api.createJob(input)
+    const result = editingId.value != null
+      ? await api.updateJob(editingId.value, input)
+      : await api.createJob(input)
+    if (!result.ok) {
+      // A rejected write (e.g. adopted-command guard, drift) must surface — not silently close.
+      saveError.value = result.error ?? 'Failed to save job'
+      return
     }
     saveError.value = null
     editorOpen.value = false
@@ -102,14 +105,16 @@ async function onSave(input: CreateJobInput): Promise<void> {
 }
 async function onAdopt(it: JobListItem): Promise<void> {
   if (!it.native) return
-  const item: AdoptItem = { scheduleExpr: it.native.scheduleExpr, command: it.native.command }
+  // #8: carry the native name (Windows Task Scheduler) into the adopted job; cron has none → blank.
+  const item: AdoptItem = { name: it.native.name, scheduleExpr: it.native.scheduleExpr, command: it.native.command }
   try {
     await api.adoptJobs([item])
     await store.refresh()
   } catch { /* best-effort */ }
 }
 async function onScan(): Promise<void> {
-  try { await store.refresh() } catch { /* best-effort */ }
+  // store.refresh() owns loading/error state and never throws; errors surface via store.scanError.
+  await store.refresh()
 }
 </script>
 <template>
@@ -121,7 +126,8 @@ async function onScan(): Promise<void> {
     </div>
     <JobEditor :open="editorOpen" :initial="editorInitial" @save="onSave" @cancel="editorOpen = false" />
     <p v-if="saveError" class="save-err">{{ saveError }}</p>
-    <template v-if="isEmpty"><EmptyState @new="openNew" @scan="onScan" /></template>
+    <p v-if="store.scanError" class="save-err">Scan failed: {{ store.scanError }}</p>
+    <template v-if="isEmpty"><EmptyState :scanning="store.loading" :scanned="store.hasScanned && !store.scanError" @new="openNew" @scan="onScan" /></template>
     <template v-else>
       <CategoryFilter :categories="store.categories" :active="store.categoryFilter" :counts="counts" @change="store.setCategory" />
       <div class="list">
