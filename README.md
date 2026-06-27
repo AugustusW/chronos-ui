@@ -10,6 +10,16 @@ ChronosUI manages the schedulers you already use — **crontab** (macOS/Linux) a
 Scheduler** — in place, and adds what they lack: run history, captured output, durations, and
 on-demand manual runs. It is a management + observability layer, **not** a new scheduler daemon.
 
+## Download
+
+Get the latest installer from the [**Releases**](https://github.com/AugustusW/chronos-ui/releases/latest) page:
+
+- **macOS** — `.dmg` (signed + notarized; Apple Silicon)
+- **Windows** — `.exe` installer (NSIS). Currently unsigned, so on first run click
+  *More info → Run anyway* past SmartScreen.
+
+Or [build from source](#develop).
+
 ## Status
 
 Early development. See the design spec for the architecture and roadmap.
