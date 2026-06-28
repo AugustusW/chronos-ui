@@ -1,14 +1,19 @@
 # ChronosUI
 
-> Bring Order to Time — a modern, cross-platform desktop GUI for managing your OS's native job schedulers.
+> **Bring observability to native schedulers.**
 
 English | [繁體中文](./README.zh-TW.md)
 
 [![CI](https://github.com/AugustusW/chronos-ui/actions/workflows/ci.yml/badge.svg)](https://github.com/AugustusW/chronos-ui/actions/workflows/ci.yml)
 
-ChronosUI manages the schedulers you already use — **crontab** (macOS/Linux) and **Windows Task
-Scheduler** — in place, and adds what they lack: run history, captured output, durations, and
-on-demand manual runs. It is a management + observability layer, **not** a new scheduler daemon.
+A desktop control center for the schedulers you already use — **crontab** (macOS/Linux) and
+**Windows Task Scheduler**. No daemon. No lock-in. No migration. ChronosUI doesn't replace cron,
+launchd, or Task Scheduler; it makes them **observable** — run history, captured output,
+durations, and on-demand runs.
+
+> You already have a scheduler. What you're missing is visibility.
+
+<!-- TODO: hero GIF — Open → Adopt → Run → History → Done (~15s). Recording is a follow-up. -->
 
 ## Download
 
@@ -20,9 +25,40 @@ Get the latest installer from the [**Releases**](https://github.com/AugustusW/ch
 
 Or [build from source](#develop).
 
-## Status
+## Why?
 
-Early development. See the design spec for the architecture and roadmap.
+Every developer eventually accumulates automation: daily backups, AI agents, scrapers, device
+sync, data collectors, log cleanup. It all ends up in cron. Months later you SSH into a machine,
+open `crontab -e`, and wonder *"which job is this, and is it even still working?"*
+
+ChronosUI exists because managing automation through SSH, logs, and `crontab` is a bad workflow —
+not because the schedulers are bad. They work fine. They just have no UI.
+
+```text
+Without ChronosUI                 With ChronosUI
+─────────────────                 ──────────────
+ssh into the box                  open the app
+crontab -e                        see every job, its last run + output
+grep, tail -f, guess              run any job on demand
+vim, repeat                       read the run history
+"…which job is this?"             done
+```
+
+## Features
+
+- ✓ Discover the cron / Task Scheduler jobs you already have
+- ✓ Adopt them without migration (no new daemon, fully reversible)
+- ✓ Run any job on demand
+- ✓ Run history with captured stdout/stderr and durations
+- ✓ SQLite by default, PostgreSQL optional
+- ✓ Cross-platform (macOS, Windows; Linux via cron)
+
+## How it works
+
+ChronosUI reads your native scheduler and shows it in a clean GUI. To record the output of
+*scheduled* runs, it can "adopt" a job by wrapping its command with a small bundled binary
+(`schedmgr`) — fully transparent (same working directory, environment, and exit code) and
+one-click reversible. The exact `crontab` rewrite is documented before release.
 
 ## Develop
 
@@ -36,16 +72,18 @@ npm run lint     # lint
 npm run build    # production build
 ```
 
-Requires Node 20+.
+Requires Node 20+. Releasing is documented in [RELEASING.md](./RELEASING.md).
 
-## How it works (preview)
+## Status
 
-ChronosUI reads your native scheduler and shows a clean GUI. To record the output of _scheduled_
-runs, it can "adopt" a job by wrapping its command with a small bundled binary (`schedmgr`) —
-fully transparent (same working dir, env, and exit code) and one-click reversible. Details and the
-exact `crontab` rewrite are documented before release.
+Early development — the data layer, scheduler adapters, and run history are in place; the UI and
+packaging are still settling. Issues and PRs welcome.
 
 ## License
 
 Apache-2.0. See [LICENSE](./LICENSE) and [NOTICE](./NOTICE). Contributions require a DCO sign-off
 (`git commit -s`); see [CONTRIBUTING](./CONTRIBUTING.md).
+
+---
+
+> You don't need another scheduler. You need to understand the one you already have.
