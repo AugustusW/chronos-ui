@@ -1,55 +1,43 @@
 # Releasing ChronosUI
 
-Installers are built and attached to a GitHub Release by `.github/workflows/release.yml`:
+Each release attaches two installers to the GitHub Release for a tag:
 
-- **macOS** → signed + notarized `.dmg` (Developer ID Application + App Store Connect API key)
-- **Windows** → unsigned `.exe` (NSIS). No code-signing cert yet, so first launch shows a
-  SmartScreen warning — see [Windows note](#windows-smartscreen) below.
+- **macOS** — signed + notarized `.dmg`, built and uploaded **locally** (see below).
+- **Windows** — unsigned `.exe` (NSIS), built by CI (`.github/workflows/release.yml`).
 
-## One-time setup: GitHub secrets
+Why the split: the Developer ID signing key is **Cloud-managed and cannot be exported** to a
+`.p12` for CI, so macOS signing/notarization must happen on a machine that has the key in its
+keychain. Windows needs no cert, so CI builds it.
 
-Only the macOS job needs secrets. Set them under **Settings → Secrets and variables → Actions**
-(or via `gh secret set`). The signing material never lands in the repo.
+## macOS — local build (signed + notarized)
 
-| Secret | What it is |
-|---|---|
-| `CSC_LINK` | base64 of the **Developer ID Application** `.p12` |
-| `CSC_KEY_PASSWORD` | the password you set when exporting that `.p12` |
-| `APPLE_API_KEY_B64` | base64 of the App Store Connect API key `.p8` |
-| `APPLE_API_KEY_ID` | the ASC API key ID (e.g. `ABCD1234EF`) |
-| `APPLE_API_ISSUER` | the ASC API issuer UUID |
-
-### Export the Developer ID `.p12`
-
-The cert is already in your login keychain (`Developer ID Application: YU CHIN WANG`).
+The signing identity (`Developer ID Application: …`) lives in the login keychain; the App Store
+Connect API key for notarization is configured in `~/.config/chronos-ui/notarize.env`
+(`APPLE_API_KEY` / `APPLE_API_KEY_ID` / `APPLE_API_ISSUER` — not in any repo).
 
 ```bash
-# Keychain Access → My Certificates → right-click "Developer ID Application: …"
-#   → Export → save as devid.p12 → set an export password.
-# Then:
-base64 -i devid.p12 | pbcopy        # paste as CSC_LINK
-#                                     CSC_KEY_PASSWORD = the export password
+# 1. bump version in package.json + commit + tag (see "Cutting a release")
+# 2. build, sign, and notarize the .app (electron-builder afterSign hook → notarytool)
+source ~/.config/chronos-ui/notarize.env
+npm run dist:mac          # → dist/ChronosUI-<ver>-arm64.dmg (the .app inside is stapled)
+
+# 3. notarize + staple the .dmg itself (so the download has no Gatekeeper prompt)
+xcrun notarytool submit dist/ChronosUI-*-arm64.dmg \
+  --key "$APPLE_API_KEY" --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER" --wait
+xcrun stapler staple dist/ChronosUI-*-arm64.dmg
+xcrun stapler validate dist/ChronosUI-*-arm64.dmg   # "The validate action worked!"
+
+# 4. attach to the Release
+gh release upload v<ver> dist/ChronosUI-*-arm64.dmg --clobber --repo AugustusW/chronos-ui
 ```
 
-### App Store Connect API key (.p8)
+## Windows — CI build (unsigned)
 
-This is the same key `notarize.mjs` already uses locally (`APPLE_API_KEY` / `APPLE_API_KEY_ID`
-/ `APPLE_API_ISSUER`). If you need to (re)create it: App Store Connect → Users and Access →
-Integrations → App Store Connect API → generate a key with **Developer** access, download the
-`.p8` once, and note the Key ID + Issuer ID.
+`release.yml` runs on a `v*` tag push (or **Actions → Release → Run workflow** with the tag) and
+uploads `ChronosUI-Setup-<ver>.exe` to the Release. No secrets required.
 
 ```bash
-base64 -i AuthKey_XXXXXXXXXX.p8 | pbcopy   # paste as APPLE_API_KEY_B64
-```
-
-### Set them with the gh CLI (alternative to the web UI)
-
-```bash
-gh secret set CSC_LINK          --repo AugustusW/chronos-ui < <(base64 -i devid.p12)
-gh secret set CSC_KEY_PASSWORD  --repo AugustusW/chronos-ui   # prompts for value
-gh secret set APPLE_API_KEY_B64 --repo AugustusW/chronos-ui < <(base64 -i AuthKey_XXXXXXXXXX.p8)
-gh secret set APPLE_API_KEY_ID  --repo AugustusW/chronos-ui
-gh secret set APPLE_API_ISSUER  --repo AugustusW/chronos-ui
+gh workflow run release.yml --repo AugustusW/chronos-ui -f tag=v<ver>
 ```
 
 ## Cutting a release
@@ -57,22 +45,13 @@ gh secret set APPLE_API_ISSUER  --repo AugustusW/chronos-ui
 ```bash
 # bump version in package.json, commit, then:
 git tag -a v0.1.2 -m "ChronosUI 0.1.2"
-git push origin v0.1.2          # → triggers the Release workflow
+git push origin v0.1.2          # → triggers the Windows CI build
+# then run the macOS local-build steps above and `gh release upload` the dmg
 ```
-
-For a tag that already exists (e.g. the current `v0.1.1`), trigger it manually:
-**Actions → Release → Run workflow** and enter the tag, or:
-
-```bash
-gh workflow run release.yml --repo AugustusW/chronos-ui -f tag=v0.1.1
-```
-
-The workflow builds on `macos-latest` (arm64) and `windows-latest` (x64) and uploads the
-`.dmg` / `.exe` to the Release for that tag.
 
 ## Windows SmartScreen
 
-The Windows installer is unsigned, so SmartScreen shows
-"Windows protected your PC" on first run. Click **More info → Run anyway**. To remove the
-warning later, add a Windows code-signing cert (Authenticode) as `CSC_LINK` / `CSC_KEY_PASSWORD`
-for the Windows job, or use Azure Trusted Signing.
+The Windows installer is unsigned, so SmartScreen shows "Windows protected your PC" on first run.
+Click **More info → Run anyway**. To remove the warning, add a Windows code-signing cert
+(Authenticode) — set `CSC_LINK` / `CSC_KEY_PASSWORD` on the repo and re-add signing to the
+Windows job, or use Azure Trusted Signing.
