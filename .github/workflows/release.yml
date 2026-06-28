@@ -22,7 +22,9 @@ permissions:
 
 jobs:
   windows:
-    runs-on: windows-latest
+    # Pinned to windows-2022 (not windows-latest, now windows-2025): node-gyp 10.x can't locate
+    # Visual Studio on the 2025 image, and rebuild-native.mjs compiles better-sqlite3 from source.
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
         with:
