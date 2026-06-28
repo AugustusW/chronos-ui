@@ -85,8 +85,10 @@ describe('CrontabAdapter adopt/unadopt', () => {
     expect(res.ok).toBe(true)
     const written = state.writes.at(-1)!
     expect(written).toContain('# chronos:42')
-    // full template: schedule + schedmgr run <id> --db <db> -- '<quoted original>'
-    expect(written).toContain(`0 3 * * * ${SCHEDMGR} run 42 --db ${DB} -- 'backup.sh && notify.sh'`)
+    // full template: schedule + schedmgr run <id> --db <quoted db> -- '<quoted original>'
+    // The db path MUST be shell-quoted: macOS userData is ".../Application Support/..." (has a
+    // space), and cron re-parses the line via /bin/sh — an unquoted path splits and schedmgr bails.
+    expect(written).toContain(`0 3 * * * ${SCHEDMGR} run 42 --db '${DB}' -- 'backup.sh && notify.sh'`)
     // re-listing yields the original command back (unquoted), adopted=true
     const j = (await a.list()).find((x) => x.chronosId === 42)!
     expect(j.adopted).toBe(true)
@@ -204,8 +206,8 @@ describe('CrontabAdapter.adoptMany', () => {
     expect(writes).toHaveLength(1) // ONE write, not two
     expect(writes[0]).toContain('# chronos:1')
     expect(writes[0]).toContain('# chronos:2')
-    expect(writes[0]).toContain('/opt/schedmgr run 1 --db /db/chronos.db')
-    expect(writes[0]).toContain('/opt/schedmgr run 2 --db /db/chronos.db')
+    expect(writes[0]).toContain("/opt/schedmgr run 1 --db '/db/chronos.db'")
+    expect(writes[0]).toContain("/opt/schedmgr run 2 --db '/db/chronos.db'")
   })
 
   it('fails the whole batch (no write) when any spec has no matching line', async () => {

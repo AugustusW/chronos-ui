@@ -174,7 +174,7 @@ export class CrontabAdapter implements SchedulerAdapter {
     )
     if (!j) return { ok: false, reason: 'error', error: 'no matching unadopted line' }
     const wrapped =
-      `${opts.scheduleExpr} ${opts.schedmgrPath} run ${chronosId} --db ${opts.dbPath} ` +
+      `${opts.scheduleExpr} ${opts.schedmgrPath} run ${chronosId} --db ${shellQuote(opts.dbPath)} ` +
       `-- ${shellQuote(opts.command)}`
     // Replace the job line with the wrapped line, then insert a marker comment above it.
     model.setLineRaw(j.lineIndex, wrapped)
@@ -210,7 +210,7 @@ export class CrontabAdapter implements SchedulerAdapter {
     targets.sort((a, b) => b.lineIndex - a.lineIndex)
     for (const { spec, lineIndex } of targets) {
       const wrapped =
-        `${spec.scheduleExpr} ${this.opts.schedmgrPath} run ${spec.chronosId} --db ${this.opts.dbPath} ` +
+        `${spec.scheduleExpr} ${this.opts.schedmgrPath} run ${spec.chronosId} --db ${shellQuote(this.opts.dbPath)} ` +
         `-- ${shellQuote(spec.command)}`
       model.setLineRaw(lineIndex, wrapped)
       model.lines.splice(lineIndex, 0, { raw: `# chronos:${spec.chronosId}` })
