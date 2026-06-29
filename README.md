@@ -13,9 +13,11 @@ durations, and on-demand runs.
 
 > You already have a scheduler. What you're missing is visibility.
 
-![ChronosUI — Schedules](docs/screenshot-schedules.png)
-
-<!-- TODO: hero GIF (Discover → Adopt → Run → History, ~10s) — screen recording is a follow-up. -->
+<p align="center">
+  <img src="assets/hero.gif" alt="ChronosUI — discover, adopt, run, and review run history for your native schedulers" width="900">
+  <br>
+  <sub><a href="assets/hero.mp4">▶ Watch in higher quality (MP4)</a></sub>
+</p>
 
 ## Download
 

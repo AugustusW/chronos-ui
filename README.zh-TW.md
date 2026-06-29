@@ -12,9 +12,11 @@
 
 > 你已經有排程器了，缺的只是「看得見」。
 
-![ChronosUI — Schedules](docs/screenshot-schedules.png)
-
-<!-- TODO: hero GIF（探索 → 接管 → 執行 → 歷史，約 10 秒）—— 螢幕錄製為後續工作。 -->
+<p align="center">
+  <img src="assets/hero.gif" alt="ChronosUI — 探索、接管、執行原生排程器，並檢視執行紀錄" width="900">
+  <br>
+  <sub><a href="assets/hero.mp4">▶ 觀看高畫質版（MP4）</a></sub>
+</p>
 
 ## 下載
 
