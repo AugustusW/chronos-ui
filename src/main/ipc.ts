@@ -29,8 +29,9 @@ export const MAX_RUN_LIST_LIMIT = 1000
 const isPosInt = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v) && v > 0
 const isStr = (v: unknown): v is string => typeof v === 'string'
 // A schedule expr / command is written verbatim into the native scheduler line — an embedded
-// newline would inject a second entry. Reject it at the boundary (code review #1).
-const isLine = (v: unknown): v is string => isStr(v) && !v.includes('\n')
+// newline (\n) OR carriage return (\r) would inject a second entry. Reject both at the boundary
+// (code review #1 / #10 — a bare \r is treated as a line break by crontab parsers).
+const isLine = (v: unknown): v is string => isStr(v) && !v.includes('\n') && !v.includes('\r')
 const isOptStr = (v: unknown): boolean => v === undefined || isStr(v)
 const bad = (msg: string): WriteResult => ({ ok: false, reason: 'error', errorCode: 'invalid_input', error: msg })
 const badBatch = (msg: string): BatchWriteResult => ({ ok: false, reason: 'error', errorCode: 'invalid_input', error: msg, adopted: [] })
@@ -123,11 +124,22 @@ export function handleRunsRecent(deps: IpcDeps, payload: unknown): Promise<RunLo
 }
 
 const isWindow = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v) && v >= 0
+// The bot token is interpolated into the Telegram API URL path (Go side: fmt.Sprintf(".../bot%s/...")),
+// so a token carrying '/', '..' or query chars could reshape the request path. The chatId selects the
+// notification recipient. Validate both formats at the IPC boundary so a compromised renderer can't
+// smuggle a malformed value into the URL or redirect alerts (code review #7). Token: "<botId>:<auth>";
+// chatId: signed integer (groups are negative) or "@channelusername".
+const NOTIFY_TOKEN_RE = /^\d+:[A-Za-z0-9_-]+$/
+const CHAT_ID_RE = /^-?\d+$|^@\w+$/
+const isNotifyToken = (v: unknown): v is string => isStr(v) && NOTIFY_TOKEN_RE.test(v)
+const isChatId = (v: unknown): v is string => isStr(v) && CHAT_ID_RE.test(v)
 function isNotifyInput(p: unknown): p is NotifySaveInput {
   if (!p || typeof p !== 'object') return false
   const o = p as Record<string, unknown>
-  return typeof o.enabled === 'boolean' && (o.chatId === null || isStr(o.chatId)) && isWindow(o.windowMin) &&
-    (o.token === undefined || isStr(o.token))
+  // token === undefined | '' means "keep the existing token" (see notify.service saveSettings),
+  // so a format check only applies to a non-empty token string.
+  return typeof o.enabled === 'boolean' && (o.chatId === null || isChatId(o.chatId)) && isWindow(o.windowMin) &&
+    (o.token === undefined || o.token === '' || isNotifyToken(o.token))
 }
 export async function handleNotifyGet(deps: IpcDeps) { return deps.notify.getSettings() }
 export async function handleNotifySave(deps: IpcDeps, payload: unknown) {

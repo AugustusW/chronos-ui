@@ -11,8 +11,8 @@ describe('notify IPC handlers', () => {
   })
   it('forwards a valid payload to the service', async () => {
     const save = vi.fn(async () => ({ ok: true }))
-    const r = await handleNotifySave(depsWith({ saveSettings: save }), { enabled: true, chatId: '1', windowMin: 5, token: 'T' })
+    const r = await handleNotifySave(depsWith({ saveSettings: save }), { enabled: true, chatId: '1', windowMin: 5, token: '123:ABC' })
     expect(r.ok).toBe(true)
-    expect(save).toHaveBeenCalledWith({ enabled: true, chatId: '1', windowMin: 5, token: 'T' })
+    expect(save).toHaveBeenCalledWith({ enabled: true, chatId: '1', windowMin: 5, token: '123:ABC' })
   })
 })
