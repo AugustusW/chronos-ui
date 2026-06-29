@@ -2,6 +2,20 @@ import { resolve } from 'path'
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
 import vue from '@vitejs/plugin-vue'
 import { viteStaticCopy } from 'vite-plugin-static-copy'
+import { buildCspContent } from './src/main/window-security'
+
+// Inject a strict Content-Security-Policy <meta> into the packaged renderer (code review #2). The
+// renderer loads over file:// in production, where session.webRequest.onHeadersReceived never fires,
+// so a build-time <meta> is the reliable delivery. Build-only (`apply: 'build'`): the Vite dev server
+// needs inline scripts + ws: for HMR, which a strict CSP would block.
+const injectCsp = {
+  name: 'chronos-inject-csp',
+  apply: 'build' as const,
+  transformIndexHtml(html: string): string {
+    const meta = `<meta http-equiv="Content-Security-Policy" content="${buildCspContent()}" />`
+    return html.replace('</head>', `    ${meta}\n  </head>`)
+  }
+}
 
 export default defineConfig({
   main: {
@@ -45,7 +59,7 @@ export default defineConfig({
   renderer: {
     root: 'src/renderer',
     resolve: { alias: { '@': resolve('src/renderer/src') } },
-    plugins: [vue()],
+    plugins: [vue(), injectCsp],
     build: { rollupOptions: { input: { index: resolve('src/renderer/index.html') } } }
   }
 })

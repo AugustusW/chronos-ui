@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-import { app, BrowserWindow, dialog } from 'electron'
+import { app, BrowserWindow, dialog, shell } from 'electron'
 import { join } from 'path'
+import { pathToFileURL } from 'node:url'
 import { installCrashGuards } from './crash-guards'
 import { buildMainDeps } from './bootstrap'
 import { registerIpcHandlers } from './ipc'
@@ -8,6 +9,7 @@ import { startCheckpointTimer } from './db/lifecycle'
 import { watchDbForChanges } from './db/watch'
 import type { DatabaseHandle } from './db/client'
 import { createTray, type TrayHandle } from './tray'
+import { installNavigationHardening } from './window-security'
 
 // Install crash guards as early as possible: a stray uncaught error in main must surface a visible,
 // debuggable dialog (ChronosUI is a developer tool) rather than silently quitting the app.
@@ -36,7 +38,12 @@ function createWindow(): void {
   win.on('close', (e) => {
     if (!isQuitting && process.platform !== 'darwin') { e.preventDefault(); win.hide() }
   })
-  if (process.env['ELECTRON_RENDERER_URL']) win.loadURL(process.env['ELECTRON_RENDERER_URL'])
+  // Navigation lockdown (code review #3): deny in-app popups (open http(s) in the OS browser instead)
+  // and prevent the main window from being navigated away from the app's own page.
+  const rendererUrl = process.env['ELECTRON_RENDERER_URL']
+  const appUrl = rendererUrl ?? pathToFileURL(join(__dirname, '../renderer/index.html')).toString()
+  installNavigationHardening(win.webContents, () => appUrl, (u) => { void shell.openExternal(u) })
+  if (rendererUrl) win.loadURL(rendererUrl)
   else win.loadFile(join(__dirname, '../renderer/index.html'))
 }
 
