@@ -50,6 +50,7 @@ vim, repeat                       read the run history
 - ✓ Adopt them without migration (no new daemon, fully reversible)
 - ✓ Run any job on demand
 - ✓ Run history with captured stdout/stderr and durations
+- ✓ Telegram notifications when a scheduled job fails or times out (immediate, or batched into a digest)
 - ✓ SQLite by default, PostgreSQL optional
 - ✓ Cross-platform (macOS, Windows; Linux via cron)
 
@@ -59,6 +60,22 @@ ChronosUI reads your native scheduler and shows it in a clean GUI. To record the
 *scheduled* runs, it can "adopt" a job by wrapping its command with a small bundled binary
 (`schedmgr`) — fully transparent (same working directory, environment, and exit code) and
 one-click reversible. The exact `crontab` rewrite is documented before release.
+
+## macOS permissions
+
+ChronosUI manages your **user crontab** — on macOS its only system-level calls are `crontab -l` / `crontab -`. Because macOS keeps crontab files under `/var/at/tabs/` (a TCC-protected _sysadmin_ location), **adopting or editing an existing cron job** triggers a broad system prompt:
+
+> _"ChronosUI" wants to administer this computer. Administration can include modifying passwords, network settings, and system settings._
+
+That wording is macOS's generic description of the permission category (`kTCCServiceSystemPolicySysAdminFiles`) — **not** what ChronosUI does. It never touches passwords, network, or system settings. Click **Allow** to let ChronosUI manage cron; you only need to do this once.
+
+**Batched Telegram notifications do _not_ trigger this prompt** — ChronosUI installs its internal flush schedule as a per-user **LaunchAgent** (`~/Library/LaunchAgents/com.augustusw.chronos-ui.notify-flush.plist`), which lives in your home directory, not the protected sysadmin location.
+
+If you clicked **Don't Allow** by mistake, the decision is sticky and is **not** shown in System Settings → Privacy & Security. Reset it from a terminal, then relaunch and adopt again:
+
+```bash
+tccutil reset All com.augustusw.chronos-ui
+```
 
 ## Develop
 

@@ -3,6 +3,7 @@ package main
 
 import (
 	"fmt"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -16,6 +17,9 @@ func itoa(n int64) string { return strconv.FormatInt(n, 10) }
 // runMain parses args and runs the wrapped command, returning the exit code to propagate.
 // Layout: run <jobId> --db <path> [--triggered-by schedule|manual] [--timeout <sec>] -- <cmd...>
 func runMain(args []string) int {
+	if len(args) >= 1 && args[0] == "notify-flush" {
+		return runNotifyFlush(args[1:])
+	}
 	if len(args) < 1 || args[0] != "run" {
 		fmt.Fprintln(os.Stderr, "schedmgr: usage: schedmgr run <jobId> --db <path> [--triggered-by schedule|manual] [--timeout <sec>] -- <cmd...>")
 		return 2
@@ -107,19 +111,30 @@ func runWrapped(jobID int64, dbPath, triggeredBy string, timeout time.Duration, 
 	res := runCommand(command, os.Stdout, os.Stderr, timeout)
 	ended := time.Now()
 
+	result := "success"
+	if res.timedOut {
+		result = "timeout"
+	} else if res.exitCode != 0 {
+		result = "failure"
+	}
+
 	if st != nil && runID > 0 {
-		result := "success"
-		if res.timedOut {
-			result = "timeout"
-		} else if res.exitCode != 0 {
-			result = "failure"
-		}
 		if err := st.finishRun(runID, result, started, ended, res.exitCode, res.stdout, res.stderr); err != nil {
 			fmt.Fprintf(os.Stderr, "schedmgr: finishRun failed: %v\n", err)
 		}
 		if err := st.updateJobCache(jobID, ended, result); err != nil {
 			fmt.Fprintf(os.Stderr, "schedmgr: updateJobCache failed: %v\n", err)
 		}
+	}
+	if st != nil && result != "success" && triggeredBy == "schedule" {
+		notifyAfterRun(notifyDeps{
+			st:         st,
+			resolveTok: resolveNotifyToken,
+			send: func(token, chatID, text string) error {
+				return sendTelegram(&http.Client{Timeout: 10 * time.Second}, telegramBaseURL, token, chatID, text)
+			},
+			now: time.Now,
+		}, jobID, result, res.exitCode, ended, res.stderr)
 	}
 	return res.exitCode
 }

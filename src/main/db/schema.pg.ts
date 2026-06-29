@@ -16,6 +16,7 @@ export const jobs = pgTable('jobs', {
   adopted: boolean('adopted').notNull().default(false),
   timeoutSec: integer('timeoutSec'),
   category: text('category'),
+  notifyOnFailure: boolean('notifyOnFailure').notNull().default(false),
   lastRunAt: ts('lastRunAt'),
   lastResult: text('lastResult', { enum: ['success', 'failure', 'timeout'] }),
   createdAt: ts('createdAt')
@@ -44,7 +45,30 @@ export const runLogs = pgTable('run_logs', {
     .$defaultFn(() => new Date())
 })
 
+export const notifySettings = pgTable('notify_settings', {
+  id: integer('id').primaryKey(),
+  enabled: boolean('enabled').notNull().default(false),
+  chatId: text('chatId'),
+  windowMin: integer('windowMin').notNull().default(0),
+  updatedAt: ts('updatedAt').notNull().$defaultFn(() => new Date())
+})
+
+export const notifyOutbox = pgTable('notify_outbox', {
+  id: serial('id').primaryKey(),
+  jobId: integer('jobId').notNull().references(() => jobs.id, { onDelete: 'cascade' }),
+  jobName: text('jobName').notNull(),
+  result: text('result', { enum: ['failure', 'timeout'] }).notNull(),
+  exitCode: integer('exitCode'),
+  occurredAt: ts('occurredAt').notNull(),
+  sentAt: ts('sentAt'),
+  createdAt: ts('createdAt').notNull().$defaultFn(() => new Date())
+})
+
 export type Job = typeof jobs.$inferSelect
 export type NewJob = typeof jobs.$inferInsert
 export type RunLog = typeof runLogs.$inferSelect
 export type NewRunLog = typeof runLogs.$inferInsert
+export type NotifySettings = typeof notifySettings.$inferSelect
+export type NewNotifySettings = typeof notifySettings.$inferInsert
+export type NotifyOutbox = typeof notifyOutbox.$inferSelect
+export type NewNotifyOutbox = typeof notifyOutbox.$inferInsert

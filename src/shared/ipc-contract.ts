@@ -18,7 +18,10 @@ export const IPC = {
   runsRecent: 'runs:recent',
   jobsRunNowStreaming: 'jobs:runNowStreaming',
   jobsRunBatchCancel: 'jobs:runBatchCancel',
-  runEvent: 'run:event'
+  runEvent: 'run:event',
+  notifyGet: 'notify:get',
+  notifySave: 'notify:save',
+  notifyTest: 'notify:test'
 } as const
 
 export interface AppVersion {
@@ -50,6 +53,7 @@ export interface CreateJobInput {
   env?: Record<string, string>
   timeoutSec?: number
   category?: string
+  notifyOnFailure?: boolean
 }
 
 export interface UpdateJobChanges {
@@ -60,6 +64,7 @@ export interface UpdateJobChanges {
   env?: Record<string, string>
   timeoutSec?: number
   category?: string
+  notifyOnFailure?: boolean
 }
 
 /** Renderer → main adopt item — an unmanaged native line the user chose to take over (has no DB id yet). */
@@ -82,3 +87,4 @@ export type RunEvent =
   | { kind: 'jobsChanged' }
 
 export type { Job, RunLog, ParsedJob, BatchWriteResult, WriteResult }
+export type { NotifySettingsDTO, NotifySaveInput, SaveResult } from '../main/services/notify.service'

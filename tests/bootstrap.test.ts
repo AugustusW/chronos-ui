@@ -61,7 +61,8 @@ describe('buildMainDeps schedmgr descriptor (postgres backend config)', () => {
     // Adopting the unmanaged line bakes the descriptor (the non-secret keychain reference) — NOT the
     // sqlite path, and NOT the DSN — into the schedmgr-wrapped crontab line.
     await built.deps.service.adopt([{ scheduleExpr: '0 3 * * *', command: '/b.sh' }])
-    expect(crontabWritten).toContain('--db pg:keychain:com.augustusw.chronos-ui/pg-dsn')
+    // The --db descriptor is shell-quoted in the crontab line (fix #1353), so assert the quoted form.
+    expect(crontabWritten).toContain("--db 'pg:keychain:com.augustusw.chronos-ui/pg-dsn'")
     expect(crontabWritten).not.toContain('chronos.db')
 
     await built.handle.close()

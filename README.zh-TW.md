@@ -47,6 +47,7 @@ vim、重來一遍                     翻執行歷史
 - ✓ 無痛接管（不裝新 daemon，完全可還原）
 - ✓ 隨手手動執行任何 job
 - ✓ 執行歷史：側錄 stdout/stderr + 耗時
+- ✓ 排程 job 失敗 / 逾時時發 Telegram 通知（即時，或彙整成 digest）
 - ✓ 預設 SQLite，可選 PostgreSQL
 - ✓ 跨平台（macOS、Windows；Linux 走 cron）
 
@@ -55,6 +56,22 @@ vim、重來一遍                     翻執行歷史
 ChronosUI 讀取你的原生排程器、用乾淨的 GUI 呈現。要記錄「排程自動跑」的輸出，它可以「接管」一個 job——
 用一個隨附的小程式（`schedmgr`）把指令包起來——完全透明（相同工作目錄、環境變數、exit code），且一鍵可還原。
 完整細節與 `crontab` 改寫方式會在發佈前寫清楚。
+
+## macOS 權限
+
+ChronosUI 管理的是你的**使用者 crontab**——在 macOS 上唯一碰到系統的就是 `crontab -l` / `crontab -`。因為 macOS 把 crontab 檔放在 `/var/at/tabs/`（受 TCC 保護的 _sysadmin_ 區），所以**接管（adopt）或編輯既有 cron job** 時會跳一個很大的系統提示：
+
+> _「ChronosUI」想要管理你的電腦。管理可包含修改密碼、網路功能和系統設定。_
+
+這串是 macOS 對該權限分類（`kTCCServiceSystemPolicySysAdminFiles`）的通用描述，**不是** ChronosUI 實際會做的事——它從不碰密碼、網路或系統設定。按 **允許** 讓它管理 cron 即可，只需這一次。
+
+**批次 Telegram 通知「不會」觸發這個提示**——ChronosUI 把內部的 flush 排程裝成使用者層級的 **LaunchAgent**（`~/Library/LaunchAgents/com.augustusw.chronos-ui.notify-flush.plist`），放在家目錄、不在受保護的 sysadmin 區。
+
+如果不小心按了 **不允許**，這個決定會被記住、而且**不會**出現在「系統設定 → 隱私權與安全性」。從終端機重置後重開 app 再接管一次即可：
+
+```bash
+tccutil reset All com.augustusw.chronos-ui
+```
 
 ## 開發
 

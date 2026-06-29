@@ -2,6 +2,7 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -13,6 +14,19 @@ type fakeReader struct {
 }
 
 func (f fakeReader) read(string) (string, error) { return f.dsn, f.err }
+
+// stubSecretReader is an alias used by the notify-token tests to clearly signal
+// "keychain miss" intent (same underlying type as fakeReader).
+type stubSecretReader = fakeReader
+
+// writeSecretFileForTest writes content to dir/<filename> with mode 0600.
+func writeSecretFileForTest(t *testing.T, dir, filename, content string) {
+	t.Helper()
+	path := filepath.Join(dir, filename)
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestResolveDSNKeychainHit(t *testing.T) {
 	dsn, err := resolveDSNWith(fakeReader{dsn: "postgres://u:p@h/db"}, t.TempDir(), "svc")
@@ -56,5 +70,15 @@ func TestResolveDSNNoneAvailable(t *testing.T) {
 func TestSanitizeService(t *testing.T) {
 	if got := sanitizeService("com.augustusw.chronos-ui/pg-dsn"); got != "com.augustusw.chronos-ui_pg-dsn" {
 		t.Fatalf("sanitizeService = %q", got)
+	}
+}
+
+func TestResolveNotifyTokenFromFile(t *testing.T) {
+	dir := t.TempDir()
+	writeSecretFileForTest(t, dir, "chronos-ui-notify-token.secret", "BOT:abc123")
+	kc := stubSecretReader{err: errors.New("keychain miss")} // forces file fallback
+	tok, err := resolveSecretWith(kc, dir, notifyTokenService, ".secret")
+	if err != nil || tok != "BOT:abc123" {
+		t.Fatalf("got %q err=%v", tok, err)
 	}
 }

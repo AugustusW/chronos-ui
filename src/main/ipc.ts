@@ -3,6 +3,7 @@ import { ipcMain } from 'electron'
 import { IPC, type AppVersion } from '../shared/ipc-contract'
 import type { CreateJobInput, UpdateJobChanges, AdoptItem, ReconcileResult, RunNowResult } from '../shared/ipc-contract'
 import type { JobsService } from './services/jobs.service'
+import type { NotifyService, NotifySaveInput } from './services/notify.service'
 import type { RunLog } from './db/schema'
 import type { WriteResult, BatchWriteResult } from './scheduler/types'
 
@@ -11,6 +12,7 @@ export const MAX_BATCH_ADOPT = 100
 export interface IpcDeps {
   meta: { name: string; version: string }
   service: JobsService
+  notify: NotifyService
   runNow: (id: number) => Promise<RunNowResult>
   listRunsForJob: (jobId: number, limit?: number) => Promise<RunLog[]>
   recentRuns: (limit?: number) => Promise<RunLog[]>
@@ -36,7 +38,8 @@ const badBatch = (msg: string): BatchWriteResult => ({ ok: false, reason: 'error
 function isCreateInput(p: unknown): p is CreateJobInput {
   if (!p || typeof p !== 'object') return false
   const o = p as Record<string, unknown>
-  return isStr(o.name) && isLine(o.scheduleExpr) && isLine(o.command)
+  return isStr(o.name) && isLine(o.scheduleExpr) && isLine(o.command) &&
+    (o.notifyOnFailure === undefined || typeof o.notifyOnFailure === 'boolean')
 }
 function isAdoptItem(p: unknown): p is AdoptItem {
   if (!p || typeof p !== 'object') return false
@@ -50,7 +53,8 @@ function isUpdateChanges(c: unknown): c is UpdateJobChanges {
   return (
     isOptStr(o.name) && lineOk(o.scheduleExpr) && lineOk(o.command) && isOptStr(o.workingDir) && isOptStr(o.category) &&
     (o.timeoutSec === undefined || (typeof o.timeoutSec === 'number' && Number.isInteger(o.timeoutSec))) &&
-    (o.env === undefined || (typeof o.env === 'object' && o.env !== null))
+    (o.env === undefined || (typeof o.env === 'object' && o.env !== null)) &&
+    (o.notifyOnFailure === undefined || typeof o.notifyOnFailure === 'boolean')
   )
 }
 
@@ -114,6 +118,20 @@ export function handleRunsRecent(deps: IpcDeps, payload: unknown): Promise<RunLo
   return deps.recentRuns(limit)
 }
 
+const isWindow = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v) && v >= 0
+function isNotifyInput(p: unknown): p is NotifySaveInput {
+  if (!p || typeof p !== 'object') return false
+  const o = p as Record<string, unknown>
+  return typeof o.enabled === 'boolean' && (o.chatId === null || isStr(o.chatId)) && isWindow(o.windowMin) &&
+    (o.token === undefined || isStr(o.token))
+}
+export async function handleNotifyGet(deps: IpcDeps) { return deps.notify.getSettings() }
+export async function handleNotifySave(deps: IpcDeps, payload: unknown) {
+  if (!isNotifyInput(payload)) return { ok: false as const, error: 'invalid notify settings' }
+  return deps.notify.saveSettings(payload)
+}
+export async function handleNotifyTest(deps: IpcDeps) { return deps.notify.testSend() }
+
 export function registerIpcHandlers(deps: IpcDeps): void {
   ipcMain.handle(IPC.appGetVersion, () => handleGetVersion(deps.meta))
   ipcMain.handle(IPC.jobsList, () => handleJobsList(deps))
@@ -130,4 +148,7 @@ export function registerIpcHandlers(deps: IpcDeps): void {
   ipcMain.handle(IPC.runsRecent, (_e, p) => handleRunsRecent(deps, p))
   ipcMain.handle(IPC.jobsRunNowStreaming, (_e, p) => handleJobsRunNowStreaming(deps, p))
   ipcMain.handle(IPC.jobsRunBatchCancel, () => handleJobsRunBatchCancel(deps))
+  ipcMain.handle(IPC.notifyGet, () => handleNotifyGet(deps))
+  ipcMain.handle(IPC.notifySave, (_e, p) => handleNotifySave(deps, p))
+  ipcMain.handle(IPC.notifyTest, () => handleNotifyTest(deps))
 }

@@ -87,4 +87,8 @@ export interface SchedulerAdapter {
   adoptMany(specs: AdoptionSpec[]): Promise<BatchWriteResult>
   unadopt(chronosId: number, originalCommand: string): Promise<WriteResult>
   detectDrift(): Promise<DriftResult>
+  /** Install (or replace) the managed flush cron entry that runs `schedmgr notify-flush` every windowMin minutes. */
+  installFlushEntry(windowMin: number): Promise<WriteResult>
+  /** Remove the managed flush cron entry (and its reserved marker comment). No-op if absent. */
+  removeFlushEntry(): Promise<WriteResult>
 }

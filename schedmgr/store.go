@@ -131,6 +131,137 @@ func (s *store) updateJobCache(jobID int64, lastRunAt time.Time, lastResult stri
 	return err
 }
 
+// notifySettings holds the single row from notify_settings (id=1).
+type notifySettings struct {
+	enabled   bool
+	chatID    string
+	windowMin int
+}
+
+// outboxRow is a pending-outbox record to be sent via Telegram.
+type outboxRow struct {
+	id         int64
+	jobName    string
+	result     string
+	exitCode   *int64
+	occurredAt time.Time
+}
+
+// readNotifySettings reads the singleton notify_settings row (id=1).
+// Returns (settings, false, nil) when no row exists yet.
+func (s *store) readNotifySettings() (notifySettings, bool, error) {
+	var ns notifySettings
+	var chat sql.NullString
+	q := `SELECT enabled, chatId, windowMin FROM notify_settings WHERE id = 1`
+	if s.dialect == dialectPostgres {
+		q = `SELECT enabled, "chatId", "windowMin" FROM notify_settings WHERE id = 1`
+	}
+	row := s.db.QueryRow(q)
+	if err := row.Scan(&ns.enabled, &chat, &ns.windowMin); err != nil {
+		if err == sql.ErrNoRows {
+			return notifySettings{}, false, nil
+		}
+		return notifySettings{}, false, err
+	}
+	ns.chatID = chat.String
+	return ns, true, nil
+}
+
+// readJobNotify returns the job's name and notifyOnFailure flag.
+// Returns ("", false, nil) when the job does not exist.
+func (s *store) readJobNotify(jobID int64) (string, bool, error) {
+	var name string
+	var notify bool
+	q := `SELECT name, notifyOnFailure FROM jobs WHERE id = ?`
+	if s.dialect == dialectPostgres {
+		q = `SELECT name, "notifyOnFailure" FROM jobs WHERE id = $1`
+	}
+	if err := s.db.QueryRow(q, jobID).Scan(&name, &notify); err != nil {
+		if err == sql.ErrNoRows {
+			return "", false, nil
+		}
+		return "", false, err
+	}
+	return name, notify, nil
+}
+
+// insertOutbox adds a new pending notification to notify_outbox.
+func (s *store) insertOutbox(jobID int64, jobName, result string, exitCode *int64, occurredAt time.Time) error {
+	now := time.Now()
+	if s.dialect == dialectPostgres {
+		_, err := s.db.Exec(
+			`INSERT INTO notify_outbox ("jobId","jobName",result,"exitCode","occurredAt","createdAt") VALUES ($1,$2,$3,$4,$5,$6)`,
+			jobID, jobName, result, exitCode, occurredAt, now)
+		return err
+	}
+	var ec interface{}
+	if exitCode != nil {
+		ec = *exitCode
+	}
+	_, err := s.db.Exec(
+		`INSERT INTO notify_outbox (jobId,jobName,result,exitCode,occurredAt,createdAt) VALUES (?,?,?,?,?,?)`,
+		jobID, jobName, result, ec, occurredAt.UnixMilli(), now.UnixMilli())
+	return err
+}
+
+// listPendingOutbox returns up to limit unsent outbox rows ordered by occurredAt ascending.
+func (s *store) listPendingOutbox(limit int) ([]outboxRow, error) {
+	q := `SELECT id, jobName, result, exitCode, occurredAt FROM notify_outbox WHERE sentAt IS NULL ORDER BY occurredAt LIMIT ?`
+	if s.dialect == dialectPostgres {
+		q = `SELECT id, "jobName", result, "exitCode", "occurredAt" FROM notify_outbox WHERE "sentAt" IS NULL ORDER BY "occurredAt" LIMIT $1`
+	}
+	rows, err := s.db.Query(q, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []outboxRow
+	for rows.Next() {
+		var r outboxRow
+		var ec sql.NullInt64
+		if s.dialect == dialectPostgres {
+			var t time.Time
+			if err := rows.Scan(&r.id, &r.jobName, &r.result, &ec, &t); err != nil {
+				return nil, err
+			}
+			r.occurredAt = t
+		} else {
+			var ms int64
+			if err := rows.Scan(&r.id, &r.jobName, &r.result, &ec, &ms); err != nil {
+				return nil, err
+			}
+			r.occurredAt = time.UnixMilli(ms)
+		}
+		if ec.Valid {
+			v := ec.Int64
+			r.exitCode = &v
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// markOutboxSent stamps sentAt = now for each id. Per-id loop keeps placeholder
+// handling trivial and dialect-uniform (see brief decision note).
+func (s *store) markOutboxSent(ids []int64) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	now := time.Now()
+	for _, id := range ids {
+		q := `UPDATE notify_outbox SET sentAt = ? WHERE id = ?`
+		var arg interface{} = now.UnixMilli()
+		if s.dialect == dialectPostgres {
+			q = `UPDATE notify_outbox SET "sentAt" = $1 WHERE id = $2`
+			arg = now
+		}
+		if _, err := s.db.Exec(q, arg, id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // splitMigration splits Drizzle's generated SQL on its statement-breakpoint markers.
 func splitMigration(sql string) []string {
 	var out []string

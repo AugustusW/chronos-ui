@@ -1,6 +1,6 @@
 {
   "name": "chronos-ui",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Bring Order to Time — a cross-platform desktop GUI for managing native OS schedulers.",
   "license": "Apache-2.0",
   "author": "The ChronosUI Authors",
@@ -112,7 +112,26 @@
     },
     "afterSign": "scripts/notarize.mjs",
     "dmg": {
-      "artifactName": "ChronosUI-${version}-${arch}.dmg"
+      "artifactName": "ChronosUI-${version}-${arch}.dmg",
+      "background": "build/dmg-background.tiff",
+      "iconSize": 118,
+      "window": {
+        "width": 660,
+        "height": 420
+      },
+      "contents": [
+        {
+          "x": 165,
+          "y": 222,
+          "type": "file"
+        },
+        {
+          "x": 495,
+          "y": 222,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ]
     },
     "win": {
       "target": [

@@ -47,7 +47,8 @@ export function createJobsService(deps: JobsServiceDeps): JobsService {
         enabled: true,
         adopted: false,
         timeoutSec: input.timeoutSec ?? null,
-        category: input.category ?? null
+        category: input.category ?? null,
+        notifyOnFailure: input.notifyOnFailure ?? false
       })
       const w = await adapter.createJob({ chronosId: job.id, scheduleExpr: input.scheduleExpr, command: input.command })
       if (!w.ok) {
@@ -81,7 +82,8 @@ export function createJobsService(deps: JobsServiceDeps): JobsService {
         workingDir: changes.workingDir,
         env: changes.env,
         timeoutSec: changes.timeoutSec,
-        category: changes.category
+        category: changes.category,
+        notifyOnFailure: changes.notifyOnFailure
       })
       return { ok: true, job }
     },

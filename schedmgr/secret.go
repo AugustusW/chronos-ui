@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-// secretReader reads a secret (the Postgres DSN) from the OS keychain by service name.
+// secretReader reads a named secret from the OS keychain by service name.
 type secretReader interface {
 	read(service string) (string, error)
 }
@@ -18,28 +18,40 @@ type platformSecretReader struct{}
 
 func (platformSecretReader) read(service string) (string, error) { return keychainRead(service) }
 
-// resolveDSNWith returns the Postgres DSN for a keychain service: the OS keychain first, then a 0600
-// file fallback (spec §2.1). The DSN secret never appears in the crontab line — only the service
-// name does (the "pg:keychain:<service>" descriptor). The keychain reader + fallback dir are
-// injected so the logic is headlessly testable; openStoreWith supplies the platform defaults.
-func resolveDSNWith(kc secretReader, fallbackDir, service string) (string, error) {
-	dsn, kcErr := kc.read(service)
+const notifyTokenService = "chronos-ui-notify-token"
+
+// resolveSecretWith returns a named secret: OS keychain first, then a 0600 <service><ext> file
+// (spec §2.1). The keychain reader + fallback dir are injected so the logic is headlessly testable.
+func resolveSecretWith(kc secretReader, fallbackDir, service, ext string) (string, error) {
+	val, kcErr := kc.read(service)
 	if kcErr == nil {
-		if dsn = strings.TrimSpace(dsn); dsn != "" {
-			return dsn, nil
+		if val = strings.TrimSpace(val); val != "" {
+			return val, nil
 		}
 	}
-	fileDSN, err := readDSNFile(fallbackDir, service)
+	fileVal, err := readSecretFile(fallbackDir, service, ext)
 	if err != nil {
-		// Surface the keychain error too — on macOS the common failure is a cross-binary ACL denial
-		// (the spec-flagged hard part), which would otherwise be invisible when the fallback is absent.
 		kcNote := "returned empty"
 		if kcErr != nil {
 			kcNote = kcErr.Error()
 		}
-		return "", fmt.Errorf("no DSN for %q (keychain: %s; fallback: %w)", service, kcNote, err)
+		return "", fmt.Errorf("no secret for %q (keychain: %s; fallback: %w)", service, kcNote, err)
 	}
-	return fileDSN, nil
+	return fileVal, nil
+}
+
+// resolveDSNWith returns the Postgres DSN for a keychain service: the OS keychain first, then a
+// 0600 <service>.dsn file fallback. The DSN secret never appears in the crontab line — only the
+// service name does (the "pg:keychain:<service>" descriptor). The keychain reader + fallback dir
+// are injected so the logic is headlessly testable; openStoreWith supplies the platform defaults.
+func resolveDSNWith(kc secretReader, fallbackDir, service string) (string, error) {
+	return resolveSecretWith(kc, fallbackDir, service, ".dsn")
+}
+
+// resolveNotifyToken returns the Telegram bot token used for failure notifications: OS keychain
+// first, then a 0600 <service>.secret file fallback.
+func resolveNotifyToken() (string, error) {
+	return resolveSecretWith(platformSecretReader{}, defaultFallbackDir(), notifyTokenService, ".secret")
 }
 
 func defaultFallbackDir() string {
@@ -50,26 +62,27 @@ func defaultFallbackDir() string {
 	return filepath.Join(dir, "chronos-ui")
 }
 
-// readDSNFile reads the 0600 fallback DSN file. A looser-than-0600 file still reads (best-effort:
-// schedmgr must function) but emits a stderr warning surfacing the plaintext-secret risk.
-func readDSNFile(dir, service string) (string, error) {
-	path := filepath.Join(dir, sanitizeService(service)+".dsn")
+// readSecretFile reads a 0600 fallback secret file. A looser-than-0600 file still reads
+// (best-effort: schedmgr must function) but emits a stderr warning surfacing the plaintext-secret
+// risk.
+func readSecretFile(dir, service, ext string) (string, error) {
+	path := filepath.Join(dir, sanitizeService(service)+ext)
 	info, err := os.Stat(path)
 	if err != nil {
 		return "", err
 	}
 	if info.Mode().Perm()&0o077 != 0 {
-		fmt.Fprintf(os.Stderr, "schedmgr: WARNING: DSN fallback file %s has loose permissions %o (want 0600)\n", path, info.Mode().Perm())
+		fmt.Fprintf(os.Stderr, "schedmgr: WARNING: secret fallback file %s has loose permissions %o (want 0600)\n", path, info.Mode().Perm())
 	}
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return "", err
 	}
-	dsn := strings.TrimSpace(string(b))
-	if dsn == "" {
+	v := strings.TrimSpace(string(b))
+	if v == "" {
 		return "", fmt.Errorf("fallback file %s is empty", path)
 	}
-	return dsn, nil
+	return v, nil
 }
 
 // sanitizeService maps a keychain service name (which may contain '/' or ':') to a safe filename.

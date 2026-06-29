@@ -5,6 +5,8 @@ import * as sq from './jobs.repository'
 import * as sr from './runLogs.repository'
 import { createPgJobsRepo } from './jobs.repository.pg'
 import { createPgRunLogsRepo } from './runLogs.repository.pg'
+import { createSqliteNotifySettingsRepo, type NotifySettingsRepo } from './notifySettings.repository'
+import { createPgNotifySettingsRepo } from './notifySettings.repository.pg'
 
 type RunResult = 'success' | 'failure' | 'timeout'
 type TriggeredBy = 'schedule' | 'manual'
@@ -36,6 +38,7 @@ export interface RunLogsRepo {
 export interface Repositories {
   jobs: JobsRepo
   runLogs: RunLogsRepo
+  notifySettings: NotifySettingsRepo
 }
 
 /** SQLite repositories: thin async wrappers over the existing synchronous free functions. */
@@ -59,7 +62,8 @@ function sqliteRepos(db: SqliteDb): Repositories {
       listRecent: async (limit) => sr.listRecentRuns(db, limit),
       listForJob: async (jobId, limit) => sr.listRunsForJob(db, jobId, limit),
       getLatest: async (jobId) => sr.getLatestRun(db, jobId)
-    }
+    },
+    notifySettings: createSqliteNotifySettingsRepo(db)
   }
 }
 
@@ -67,7 +71,7 @@ function sqliteRepos(db: SqliteDb): Repositories {
 export function createRepositories(handle: DatabaseHandle): Repositories {
   if (handle.dialect === 'postgres') {
     const db = handle.db as PgDb
-    return { jobs: createPgJobsRepo(db), runLogs: createPgRunLogsRepo(db) }
+    return { jobs: createPgJobsRepo(db), runLogs: createPgRunLogsRepo(db), notifySettings: createPgNotifySettingsRepo(db) }
   }
   return sqliteRepos(handle.db as SqliteDb)
 }

@@ -1,0 +1,79 @@
+// SPDX-License-Identifier: Apache-2.0
+import { reactive } from 'vue'
+
+export function createNotifyStore() {
+  const state = reactive({
+    enabled: false,
+    chatId: '' as string,
+    windowMin: 0,
+    tokenSet: false,
+    token: '' as string, // write-only; cleared after save
+    saving: false,
+    testing: false,
+    testResult: null as string | null,
+    error: null as string | null
+  })
+
+  async function load(): Promise<void> {
+    const s = await window.chronos.getNotifySettings()
+    state.enabled = s.enabled
+    state.chatId = s.chatId ?? ''
+    state.windowMin = s.windowMin
+    state.tokenSet = s.tokenSet
+  }
+
+  async function save(): Promise<void> {
+    state.saving = true
+    state.error = null
+    try {
+      const r = await window.chronos.saveNotifySettings({
+        enabled: state.enabled,
+        chatId: state.chatId || null,
+        windowMin: state.windowMin,
+        token: state.token ? state.token : undefined
+      })
+      if (!r.ok) {
+        state.error = 'Save failed'
+      } else {
+        state.token = ''
+        if (r.settings) state.tokenSet = r.settings.tokenSet
+        if (r.flushWarning) state.error = r.flushWarning
+      }
+    } finally {
+      state.saving = false
+    }
+  }
+
+  async function test(): Promise<void> {
+    state.testing = true
+    state.testResult = null
+    try {
+      const r = await window.chronos.testNotify()
+      state.testResult = r.ok ? '✅ Test message sent' : `❌ ${r.error ?? 'Test failed'}`
+    } finally {
+      state.testing = false
+    }
+  }
+
+  return reactive({
+    get enabled() { return state.enabled },
+    set enabled(v: boolean) { state.enabled = v },
+    get chatId() { return state.chatId },
+    set chatId(v: string) { state.chatId = v },
+    get windowMin() { return state.windowMin },
+    set windowMin(v: number) { state.windowMin = v },
+    get token() { return state.token },
+    set token(v: string) { state.token = v },
+    get tokenSet() { return state.tokenSet },
+    get saving() { return state.saving },
+    get testing() { return state.testing },
+    get testResult() { return state.testResult },
+    get error() { return state.error },
+    load, save, test
+  })
+}
+
+let singleton: ReturnType<typeof createNotifyStore> | null = null
+export function useNotifyStore() { return (singleton ??= createNotifyStore()) }
+/** Reset the module-level singleton — for test isolation only. */
+export function _resetNotifySingleton(): void { singleton = null }

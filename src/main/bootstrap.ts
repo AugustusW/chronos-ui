@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-import { spawn } from 'node:child_process'
-import { join } from 'node:path'
+import { spawn, execFile } from 'node:child_process'
+import { writeFileSync, rmSync, mkdirSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { join, dirname } from 'node:path'
 import type { DatabaseHandle } from './db/client'
 import { openAndMigrate } from './db/lifecycle'
 import { createRepositories } from './db/repositories'
@@ -11,6 +13,9 @@ import { createAdapter } from './scheduler/factory'
 import { resolveSchedmgrPath } from './scheduler/schedmgr-path'
 import { makeCrontabExec, makePowerShellExec, type ExecFn } from './scheduler'
 import { createJobsService } from './services/jobs.service'
+import { createNotifyService } from './services/notify.service'
+import { goSecretDir } from './services/notify-secret'
+import { createLaunchdFlush, type FlushScheduler } from './services/notify-flush-launchd'
 import { runNow, runNowStreaming as runStreamingImpl, type SpawnLike } from './runner/manual-run'
 import { makeRunEmitter, type WebContentsLike } from './runner/run-emitter'
 import { createBatchRunner } from './runner/batch-run'
@@ -76,6 +81,54 @@ export async function buildMainDeps(app: App, opts: BuildOpts = {}): Promise<Bui
   const adapter = createAdapter(platform, exec, { schedmgrPath, dbPath: schedmgrDescriptor })
   const service = createJobsService({ repos, adapter, platform, schedmgrPath, dbPath: schedmgrDescriptor })
 
+  // notify-flush entry: macOS uses a per-user LaunchAgent (avoids the SysAdminFiles "administer this
+  // computer" prompt that editing crontab triggers); linux/win delegate to the scheduler adapter.
+  const flushScheduler: FlushScheduler =
+    platform === 'darwin'
+      ? createLaunchdFlush({
+          schedmgrPath,
+          dbDescriptor: schedmgrDescriptor,
+          launchAgentsDir: join(homedir(), 'Library', 'LaunchAgents'),
+          uid: process.getuid?.() ?? 0,
+          exec: (cmd, a) =>
+            new Promise((resolve) => {
+              // launchctl writes failures to stderr — fold it in so a non-zero exit has a useful message.
+              execFile(cmd, a, (err, stdout, stderr) => {
+                const code = (err as { code?: number } | null)?.code
+                resolve({ stdout: stdout || stderr || '', exitCode: typeof code === 'number' ? code : err ? 1 : 0 })
+              })
+            }),
+          writeFile: (p, c) => {
+            mkdirSync(dirname(p), { recursive: true })
+            writeFileSync(p, c)
+          },
+          rmFile: (p) => {
+            try {
+              rmSync(p)
+            } catch {
+              /* best-effort: already gone */
+            }
+          }
+        })
+      : { install: (n) => adapter.installFlushEntry(n), remove: () => adapter.removeFlushEntry() }
+
+  const notify = createNotifyService({
+    repos, flushScheduler, schedmgrPath, schedmgrDescriptor,
+    secretDir: goSecretDir(platform, process.env, homedir()),
+    fetchFn: fetch,
+    spawnFlush: (p, a) => new Promise<void>((resolve) => {
+      const TIMEOUT_MS = 15_000
+      let settled = false
+      const settle = (): void => { if (!settled) { settled = true; resolve() } }
+      try {
+        const child = spawn(p, a, { stdio: 'ignore' })
+        const timer = setTimeout(settle, TIMEOUT_MS)
+        child.on('close', () => { clearTimeout(timer); settle() })
+        child.on('error', () => { clearTimeout(timer); settle() })
+      } catch { settle() }
+    })
+  })
+
   const emit = makeRunEmitter(opts.getWebContents ?? (() => undefined))
 
   const runNowStreaming = (id: number): Promise<void> =>
@@ -92,6 +145,7 @@ export async function buildMainDeps(app: App, opts: BuildOpts = {}): Promise<Bui
   const deps: IpcDeps = {
     meta: { name: app.getName(), version: app.getVersion() },
     service,
+    notify,
     runNow: (id) => runNow(id, { jobs: repos.jobs, runLogs: repos.runLogs, schedmgrPath, dbPath: schedmgrDescriptor, spawn: opts.spawn ?? ((c, a) => spawn(c, a)) }),
     listRunsForJob: (jobId, limit) => repos.runLogs.listForJob(jobId, limit),
     recentRuns: (limit) => repos.runLogs.listRecent(limit),

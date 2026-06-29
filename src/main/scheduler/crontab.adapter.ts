@@ -65,9 +65,21 @@ export class CrontabAdapter implements SchedulerAdapter {
     return parseCrontab(exitCode === 0 ? stdout : '')
   }
 
+  private static readonly FLUSH_MARKER = '# chronos:notify-flush'
+
+  private flushCommandPrefix(): string {
+    return `${this.opts.schedmgrPath} notify-flush`
+  }
+
+  private isFlushLine(raw: string): boolean {
+    return raw.includes(this.flushCommandPrefix())
+  }
+
   async list(): Promise<ParsedJob[]> {
     const { model } = await this.read()
-    return model.jobs.map((j) => this.toParsed(j))
+    return model.jobs
+      .filter((j) => !this.isFlushLine(model.lines[j.lineIndex].raw))
+      .map((j) => this.toParsed(j))
   }
 
   // A managed line is "adopted" only if its command is the schedmgr invocation adopt() writes.
@@ -228,6 +240,40 @@ export class CrontabAdapter implements SchedulerAdapter {
     const prefix = j.enabled ? '' : '#'
     model.setLineRaw(j.lineIndex, `${prefix}${j.scheduleExpr} ${originalCommand}`)
     model.lines.splice(j.markerIndex, 1) // remove the marker line (above the job)
+    return this.writeGuarded(model)
+  }
+
+  async removeFlushEntry(): Promise<WriteResult> {
+    const model = await this.readNoSnapshot()
+    // Remove the flush job line(s) and any immediately-preceding reserved marker. Highest index first.
+    const idxs: number[] = []
+    for (let i = 0; i < model.lines.length; i++) {
+      if (this.isFlushLine(model.lines[i].raw)) {
+        idxs.push(i)
+        if (i > 0 && model.lines[i - 1].raw.trim() === CrontabAdapter.FLUSH_MARKER) idxs.push(i - 1)
+      }
+    }
+    if (idxs.length === 0) return { ok: true } // nothing to remove
+    for (const i of [...new Set(idxs)].sort((a, b) => b - a)) model.lines.splice(i, 1)
+    return this.writeGuarded(model)
+  }
+
+  async installFlushEntry(windowMin: number): Promise<WriteResult> {
+    if (!Number.isInteger(windowMin) || windowMin < 1) {
+      return { ok: false, reason: 'error', error: `installFlushEntry: windowMin must be ≥1, got ${windowMin}` }
+    }
+    // Idempotent: drop any existing flush entry first (read-modify-write within one guarded write).
+    const model = await this.readNoSnapshot()
+    for (let i = model.lines.length - 1; i >= 0; i--) {
+      if (this.isFlushLine(model.lines[i].raw)) {
+        if (i > 0 && model.lines[i - 1].raw.trim() === CrontabAdapter.FLUSH_MARKER) { model.lines.splice(i - 1, 2); i-- }
+        else model.lines.splice(i, 1)
+      }
+    }
+    const line = `*/${windowMin} * * * * ${this.opts.schedmgrPath} notify-flush --db ${shellQuote(this.opts.dbPath)}`
+    const last = model.lines.length - 1
+    const tail = model.lines.length > 0 && model.lines[last].raw === '' ? last : model.lines.length
+    model.lines.splice(tail, 0, { raw: CrontabAdapter.FLUSH_MARKER }, { raw: line })
     return this.writeGuarded(model)
   }
 }

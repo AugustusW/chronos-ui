@@ -5,7 +5,7 @@ import type { CreateJobInput } from '../../../shared/ipc-contract'
 import CronPreview from './CronPreview.vue'
 const props = defineProps<{ open: boolean; initial?: Partial<CreateJobInput> }>()
 const emit = defineEmits<{ save: [v: CreateJobInput]; cancel: [] }>()
-const f = reactive<CreateJobInput>({ name: '', scheduleExpr: '', command: '', ...props.initial })
+const f = reactive<CreateJobInput>({ name: '', scheduleExpr: '', command: '', notifyOnFailure: false, ...props.initial })
 watch(() => props.open, (isOpen) => {
   if (isOpen) {
     Object.assign(f, {
@@ -16,6 +16,7 @@ watch(() => props.open, (isOpen) => {
       workingDir: undefined,
       env: undefined,
       timeoutSec: undefined,
+      notifyOnFailure: false,
       ...props.initial,
     })
   }
@@ -31,6 +32,7 @@ watch(() => props.open, (isOpen) => {
         <CronPreview :expr="f.scheduleExpr" />
         <label>Command<textarea v-model="f.command" data-f="command" class="in mono" /></label>
         <label>Category<input v-model="f.category" data-f="category" class="in" /></label>
+        <label class="notify-row"><input v-model="f.notifyOnFailure" data-test="job-notify" type="checkbox" /> Notify me if this job fails</label>
       </div>
       <footer>
         <button class="btn" type="button" @click="emit('cancel')">Cancel</button>

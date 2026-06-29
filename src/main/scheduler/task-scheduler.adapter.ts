@@ -121,6 +121,8 @@ ConvertTo-Json -InputObject @($out) -Depth 8 -Compress
     this.snapshots.clear()
     const jobs: ParsedJob[] = []
     for (const t of raw) {
+      const action0 = t.Actions[0] ?? { Execute: '', Arguments: '' }
+      if (this.isFlushAction(action0.Execute, action0.Arguments)) continue
       const parsed = this.toParsed(t)
       if (parsed.chronosId !== null && t.Xml) {
         this.snapshots.set(parsed.chronosId, hash(normalizeTaskXml(t.Xml)))
@@ -391,6 +393,46 @@ Set-ScheduledTask -InputObject $t | Out-Null
     )
     if (exitCode !== 0) return { ok: false, reason: 'error', error: `delete failed (${exitCode}): ${stdout}`.trim() }
     this.snapshots.delete(chronosId)
+    return { ok: true }
+  }
+
+  private static readonly FLUSH_TASK = 'chronos-notify-flush'
+
+  private isFlushAction(execute: string | null, args: string | null): boolean {
+    return (execute ?? '') === this.opts.schedmgrPath && (args ?? '').startsWith('notify-flush')
+  }
+
+  async installFlushEntry(windowMin: number): Promise<WriteResult> {
+    if (!Number.isInteger(windowMin) || windowMin < 1) {
+      return { ok: false, reason: 'error', error: `installFlushEntry: windowMin must be ≥1, got ${windowMin}` }
+    }
+    const name = TaskSchedulerAdapter.FLUSH_TASK
+    const argString = `notify-flush --db ${winQuoteArg(this.opts.dbPath)}`
+    const script = `
+if (Get-ScheduledTask -TaskName '${name}' -TaskPath '${this.folder}' -ErrorAction SilentlyContinue) {
+  Unregister-ScheduledTask -TaskName '${name}' -TaskPath '${this.folder}' -Confirm:$false
+}
+$a = New-ScheduledTaskAction -Execute ${psQuote(this.opts.schedmgrPath)} -Argument ${psQuote(argString)}
+$t = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes ${windowMin})
+$s = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew
+$p = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
+$task = New-ScheduledTask -Action $a -Trigger $t -Settings $s -Principal $p -Description 'ChronosUI notify-flush'
+Register-ScheduledTask -TaskName '${name}' -TaskPath '${this.folder}' -InputObject $task | Out-Null
+`.trim()
+    const { exitCode, stdout } = await this.ps(script)
+    if (exitCode !== 0) return { ok: false, reason: 'error', error: `install flush failed (${exitCode}): ${stdout}`.trim() }
+    return { ok: true }
+  }
+
+  async removeFlushEntry(): Promise<WriteResult> {
+    const name = TaskSchedulerAdapter.FLUSH_TASK
+    const script = `
+if (Get-ScheduledTask -TaskName '${name}' -TaskPath '${this.folder}' -ErrorAction SilentlyContinue) {
+  Unregister-ScheduledTask -TaskName '${name}' -TaskPath '${this.folder}' -Confirm:$false
+}
+`.trim()
+    const { exitCode, stdout } = await this.ps(script)
+    if (exitCode !== 0) return { ok: false, reason: 'error', error: `remove flush failed (${exitCode}): ${stdout}`.trim() }
     return { ok: true }
   }
 }
