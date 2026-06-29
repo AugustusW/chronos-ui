@@ -13,11 +13,13 @@ durations, and on-demand runs.
 
 > You already have a scheduler. What you're missing is visibility.
 
-<!-- TODO: hero GIF — Open → Adopt → Run → History → Done (~15s). Recording is a follow-up. -->
+![ChronosUI — Schedules](docs/screenshot-schedules.png)
+
+<!-- TODO: hero GIF (Discover → Adopt → Run → History, ~10s) — screen recording is a follow-up. -->
 
 ## Download
 
-Get the latest installer from the [**Releases**](https://github.com/AugustusW/chronos-ui/releases/latest) page:
+👉 **Download the latest release: https://github.com/AugustusW/chronos-ui/releases/latest**
 
 - **macOS** — `.dmg` (signed + notarized; Apple Silicon)
 - **Windows** — `.exe` installer (NSIS). Currently unsigned, so on first run click
@@ -63,15 +65,11 @@ one-click reversible. The exact `crontab` rewrite is documented before release.
 
 ## macOS permissions
 
-ChronosUI manages your **user crontab** — on macOS its only system-level calls are `crontab -l` / `crontab -`. Because macOS keeps crontab files under `/var/at/tabs/` (a TCC-protected _sysadmin_ location), **adopting or editing an existing cron job** triggers a broad system prompt:
+### Why does macOS ask for admin-like permission?
 
-> _"ChronosUI" wants to administer this computer. Administration can include modifying passwords, network settings, and system settings._
+The first time you **adopt or edit a cron job**, macOS shows *"ChronosUI wants to administer this computer…"*. This is **not** dangerous — it's macOS's generic prompt for any app that touches crontab (cron files live in the protected `/var/at/tabs/` location). ChronosUI only runs `crontab -l` / `crontab -`; it never modifies passwords, network, or system settings. Click **Allow** once.
 
-That wording is macOS's generic description of the permission category (`kTCCServiceSystemPolicySysAdminFiles`) — **not** what ChronosUI does. It never touches passwords, network, or system settings. Click **Allow** to let ChronosUI manage cron; you only need to do this once.
-
-**Batched Telegram notifications do _not_ trigger this prompt** — ChronosUI installs its internal flush schedule as a per-user **LaunchAgent** (`~/Library/LaunchAgents/com.augustusw.chronos-ui.notify-flush.plist`), which lives in your home directory, not the protected sysadmin location.
-
-If you clicked **Don't Allow** by mistake, the decision is sticky and is **not** shown in System Settings → Privacy & Security. Reset it from a terminal, then relaunch and adopt again:
+Batched Telegram notifications don't trigger it (they use a per-user LaunchAgent in your home directory). If you clicked **Don't Allow** by mistake, reset it from a terminal and relaunch:
 
 ```bash
 tccutil reset All com.augustusw.chronos-ui
@@ -93,8 +91,8 @@ Requires Node 20+. Releasing is documented in [RELEASING.md](./RELEASING.md).
 
 ## Status
 
-Early development — the data layer, scheduler adapters, and run history are in place; the UI and
-packaging are still settling. Issues and PRs welcome.
+Early but usable. Core scheduling discovery, adoption, run history, and packaging are working. The
+UI and integrations are still evolving. Issues and PRs welcome.
 
 ## License
 
