@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-import { join } from 'node:path'
+// LaunchAgents are a macOS-only concept, so the plist path is always POSIX — use node:path/posix's
+// join (not the ambient node:path, which is win32 on a Windows host) so the path is forward-slash
+// regardless of the OS the process/test runs on.
+import { join } from 'node:path/posix'
 import type { WriteResult } from '../scheduler/types'
 
 /** Platform-agnostic install/remove of ChronosUI's own notify-flush scheduled entry. notify.service
