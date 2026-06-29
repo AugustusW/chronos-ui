@@ -7,7 +7,7 @@
 // The Go schedmgr keeps its own copy (schedmgr/telegram.go) — a different language can't import this —
 // but the two regexes must stay in sync.
 //
-//   token:  "<botId>:<auth>"   e.g. 123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw
+//   token:  "<botId>:<auth>" — a numeric bot id, a colon, then ~35 URL-safe base64 chars
 //   chatId: signed integer (groups are negative) or "@channelusername"
 export const NOTIFY_TOKEN_RE = /^\d+:[A-Za-z0-9_-]+$/
 export const CHAT_ID_RE = /^-?\d+$|^@\w+$/
