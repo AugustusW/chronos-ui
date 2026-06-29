@@ -54,3 +54,14 @@ describe('build output: preload bridge', () => {
     expect(/^\s*import\s.+\sfrom\s/m.test(preload), 'preload must not be ESM').toBe(false)
   })
 })
+
+describe('build output: Content-Security-Policy (code review #2)', () => {
+  it('packaged renderer index.html carries a strict CSP meta', () => {
+    const html = readFileSync(resolve(outDir, 'renderer', 'index.html'), 'utf8')
+    expect(html).toMatch(/http-equiv=["']Content-Security-Policy["']/)
+    // Locked default origin + closed object sink, and no unsafe-eval.
+    expect(html).toContain("default-src 'self'")
+    expect(html).toContain("object-src 'none'")
+    expect(html).not.toContain('unsafe-eval')
+  })
+})
