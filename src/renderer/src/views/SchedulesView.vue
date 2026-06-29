@@ -28,7 +28,23 @@ const adoptOpen = ref(false)
 const adoptTarget = ref<JobListItem | null>(null)
 // Status feedback (success or error)
 const statusMsg = ref<{ kind: 'ok' | 'err'; text: string } | null>(null)
-onMounted(async () => { await store.refresh(); loading.value = false })
+// Collapsible group headers
+const collapsed = ref(new Set<string>())
+function toggleGroup(cat: string): void {
+  const s = new Set(collapsed.value)
+  if (s.has(cat)) { s.delete(cat) } else { s.add(cat) }
+  collapsed.value = s
+}
+onMounted(async () => {
+  try {
+    const count = await api.managedCount()
+    if (count > 0) await store.refresh()
+  } catch {
+    /* managedCount failed → leave the welcome/EmptyState; the user can Scan */
+  } finally {
+    loading.value = false
+  }
+})
 const counts = computed<Record<string, number>>(() => {
   const c: Record<string, number> = { All: store.items.length }
   for (const cat of store.categories) c[cat] = store.items.filter((it) => it.job?.category === cat).length
@@ -73,6 +89,8 @@ async function batchDisable(): Promise<void> {
   exitSelect()
 }
 async function batchDelete(): Promise<void> {
+  const n = selectedJobIds().length
+  if (!window.confirm(`Delete ${n} job(s)? This permanently removes them and their crontab lines. For jobs you didn't create in ChronosUI, use Un-adopt or Forget to keep the cron line.`)) return
   for (const id of selectedJobIds()) { try { await api.deleteJob(id) } catch { /* best-effort */ } }
   await store.refresh()
   exitSelect()
@@ -160,6 +178,24 @@ async function onUnadopt(): Promise<void> {
     statusMsg.value = { kind: 'err', text: `Un-adopt failed: ${msg}` }
   }
 }
+async function onForget(): Promise<void> {
+  if (editingId.value == null) return
+  statusMsg.value = null
+  try {
+    const w = await api.forgetJob(editingId.value)
+    if (!w.ok) {
+      statusMsg.value = { kind: 'err', text: `Forget failed: ${w.error ?? w.reason ?? 'unknown error'}` }
+      return
+    }
+    const name = editorInitial.value?.name
+    statusMsg.value = { kind: 'ok', text: name ? `Forgot "${name}" ✓` : 'Forgot ✓' }
+    editorOpen.value = false
+    await store.refresh()
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    statusMsg.value = { kind: 'err', text: `Forget failed: ${msg}` }
+  }
+}
 async function onScan(): Promise<void> {
   // store.refresh() owns loading/error state and never throws; errors surface via store.scanError.
   await store.refresh()
@@ -170,6 +206,7 @@ async function onScan(): Promise<void> {
     <div class="topbar">
       <h1>Schedules</h1><span class="grow" />
       <button class="btn" :class="{ on: store.selectMode }" type="button" @click="store.selectMode = !store.selectMode">☑ Select</button>
+      <button class="btn" data-test="rescan" type="button" :disabled="store.loading" @click="onScan">⟳ Scan</button>
       <button class="btn primary" type="button" @click="openNew">＋ New job</button>
     </div>
     <AdoptDialog
@@ -187,6 +224,7 @@ async function onScan(): Promise<void> {
       @save="onSave"
       @cancel="editorOpen = false"
       @unadopt="onUnadopt"
+      @forget="onForget"
     />
     <p v-if="saveError" class="save-err">{{ saveError }}</p>
     <p v-if="store.scanError" class="save-err">Scan failed: {{ store.scanError }}</p>
@@ -204,14 +242,24 @@ async function onScan(): Promise<void> {
             @run="batchRun" @enable="batchEnable" @disable="batchDisable" @delete="batchDelete"
             @cancel="cancelBatchRun" @clear="exitSelect" />
           <template v-for="g in store.visibleGroups" :key="g.category">
-            <div class="ghead">{{ g.category }} <span class="gc">{{ g.items.length }}</span></div>
-            <JobRow
-              v-for="it in g.items" :key="it.job?.id ?? it.native?.scheduleExpr" :item="it"
-              :select-mode="store.selectMode" :selected="!!it.job && store.selectedIds.has(it.job.id)"
-              :running="!!it.job && store.runningRuns.has(it.job.id)"
-              @toggle-select="it.job && store.toggleSelect(it.job.id)" @run="it.job && runOne(it.job.id)"
-              @open-detail="it.job?.id && router.push('/jobs/' + it.job.id)"
-              @edit="it.job && openEdit(it.job)" @adopt="onAdopt(it)" />
+            <div
+              class="ghead"
+              data-test="ghead"
+              role="button"
+              tabindex="0"
+              @click="toggleGroup(g.category)"
+              @keydown.enter="toggleGroup(g.category)"
+              @keydown.space.prevent="toggleGroup(g.category)"
+            >{{ collapsed.has(g.category) ? '▸' : '▾' }} {{ g.category }} <span class="gc">{{ g.items.length }}</span></div>
+            <template v-if="!collapsed.has(g.category)">
+              <JobRow
+                v-for="it in g.items" :key="it.job?.id ?? it.native?.scheduleExpr" :item="it"
+                :select-mode="store.selectMode" :selected="!!it.job && store.selectedIds.has(it.job.id)"
+                :running="!!it.job && store.runningRuns.has(it.job.id)"
+                @toggle-select="it.job && store.toggleSelect(it.job.id)" @run="it.job && runOne(it.job.id)"
+                @open-detail="it.job?.id && router.push('/jobs/' + it.job.id)"
+                @edit="it.job && openEdit(it.job)" @adopt="onAdopt(it)" />
+            </template>
           </template>
         </template>
       </div>
@@ -225,7 +273,7 @@ async function onScan(): Promise<void> {
 .btn{border:1px solid var(--color-border);background:var(--color-surface);color:var(--color-text);border-radius:var(--p-radius);padding:6px 12px;font-size:12px;cursor:pointer}
 .btn.primary{background:var(--color-primary);color:var(--color-on-primary);border-color:transparent;font-weight:500}.btn.on{border-color:var(--color-primary);color:var(--color-primary)}
 .list{flex:1;overflow:auto;padding:var(--p-space-2) var(--p-space-4)}
-.ghead{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--color-text-muted);margin:var(--p-space-3) 4px var(--p-space-2)}
+.ghead{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--color-text-muted);margin:var(--p-space-3) 4px var(--p-space-2);cursor:pointer;user-select:none}
 .gc{background:var(--color-border);border-radius:20px;font-size:10px;padding:0 7px}
 .save-err{color:var(--color-danger,#e05);font-size:12px;padding:var(--p-space-2) var(--p-space-4);margin:0}
 .status-ok{color:var(--color-success,#2a9d4e);font-size:12px;padding:var(--p-space-2) var(--p-space-4);margin:0}

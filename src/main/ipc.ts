@@ -90,6 +90,10 @@ export async function handleJobsUnadopt(deps: IpcDeps, payload: unknown): Promis
   const id = (payload as { id?: unknown })?.id
   return isPosInt(id) ? deps.service.unadopt(id) : bad('invalid id')
 }
+export async function handleJobsForget(deps: IpcDeps, payload: unknown): Promise<WriteResult> {
+  const id = (payload as { id?: unknown })?.id
+  return isPosInt(id) ? deps.service.forget(id) : bad('invalid id')
+}
 export async function handleJobsRunNow(deps: IpcDeps, payload: unknown): Promise<RunNowResult> {
   const id = (payload as { id?: unknown })?.id
   if (!isPosInt(id)) throw new Error('invalid id')
@@ -131,6 +135,9 @@ export async function handleNotifySave(deps: IpcDeps, payload: unknown) {
   return deps.notify.saveSettings(payload)
 }
 export async function handleNotifyTest(deps: IpcDeps) { return deps.notify.testSend() }
+export async function handleJobsManagedCount(deps: IpcDeps): Promise<number> {
+  return deps.service.managedCount()
+}
 
 export function registerIpcHandlers(deps: IpcDeps): void {
   ipcMain.handle(IPC.appGetVersion, () => handleGetVersion(deps.meta))
@@ -143,6 +150,7 @@ export function registerIpcHandlers(deps: IpcDeps): void {
   ipcMain.handle(IPC.jobsDelete, (_e, p) => handleJobsDelete(deps, p))
   ipcMain.handle(IPC.jobsAdopt, (_e, p) => handleJobsAdopt(deps, p))
   ipcMain.handle(IPC.jobsUnadopt, (_e, p) => handleJobsUnadopt(deps, p))
+  ipcMain.handle(IPC.jobsForget, (_e, p) => handleJobsForget(deps, p))
   ipcMain.handle(IPC.jobsRunNow, (_e, p) => handleJobsRunNow(deps, p))
   ipcMain.handle(IPC.runsListForJob, (_e, p) => handleRunsListForJob(deps, p))
   ipcMain.handle(IPC.runsRecent, (_e, p) => handleRunsRecent(deps, p))
@@ -151,4 +159,5 @@ export function registerIpcHandlers(deps: IpcDeps): void {
   ipcMain.handle(IPC.notifyGet, () => handleNotifyGet(deps))
   ipcMain.handle(IPC.notifySave, (_e, p) => handleNotifySave(deps, p))
   ipcMain.handle(IPC.notifyTest, () => handleNotifyTest(deps))
+  ipcMain.handle(IPC.jobsManagedCount, () => handleJobsManagedCount(deps))
 }

@@ -31,6 +31,19 @@ describe('JobRow', () => {
     expect(w.emitted('open-detail')).toBeFalsy()
   })
 
+  it('unmanaged row has NO Run button but DOES have Adopt button', () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const um: any = { status: 'unmanaged', native: { name: 'BackupJob', command: 'C:\\backup\\run.exe --full', scheduleExpr: '0 9 * * 1', adopted: false, enabled: true } }
+    const w = mount(JobRow, { props: { item: um, selectMode: false, selected: false, running: false } })
+    expect(w.find('[data-run]').exists()).toBe(false)
+    expect(w.text()).toContain('Adopt')
+  })
+
+  it('managed row HAS Run button', () => {
+    const w = mount(JobRow, { props: { item, selectMode: false, selected: false, running: false } })
+    expect(w.find('[data-run]').exists()).toBe(true)
+  })
+
   it('shows the native name for an unmanaged Windows task (#8)', () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const um: any = { status: 'unmanaged', native: { name: 'BackupJob', command: 'C:\\backup\\run.exe --full', scheduleExpr: '0 9 * * 1', adopted: false, enabled: true } }

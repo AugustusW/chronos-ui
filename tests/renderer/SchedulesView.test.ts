@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { _resetSingleton, useScheduleStore } from '../../src/renderer/src/stores/schedule.store'
 
+const managedCount = vi.fn().mockResolvedValue(1) // default: 1 so existing tests still trigger listJobs
 const listJobs = vi.fn()
 const createJob = vi.fn().mockResolvedValue({ ok: true })
 const updateJob = vi.fn().mockResolvedValue({ ok: true })
@@ -22,6 +23,8 @@ vi.mock('vue-router', () => ({
 }))
 
 beforeEach(() => {
+  managedCount.mockReset()
+  managedCount.mockResolvedValue(1) // default: 1 so existing tests still trigger listJobs
   listJobs.mockReset()
   createJob.mockReset()
   createJob.mockResolvedValue({ ok: true })
@@ -40,7 +43,7 @@ beforeEach(() => {
   runNowStreaming.mockReset()
   runNowStreaming.mockResolvedValue(undefined)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  ;(globalThis as any).window = { chronos: { listJobs, createJob, updateJob, adoptJobs, unadoptJob, enableJob, disableJob, deleteJob, runNowStreaming } }
+  ;(globalThis as any).window = { chronos: { managedCount, listJobs, createJob, updateJob, adoptJobs, unadoptJob, enableJob, disableJob, deleteJob, runNowStreaming }, confirm: vi.fn().mockReturnValue(true) }
   pushSpy.mockClear()
   // Reset the store singleton so each test gets a fresh store
   _resetSingleton()

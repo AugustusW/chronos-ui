@@ -14,19 +14,14 @@ const emit = defineEmits<{
   cancel: []
 }>()
 
-const name = ref(props.defaultName)
+const name = ref('')
 const category = ref('')
-
-watch(
-  () => props.defaultName,
-  (v) => { name.value = v },
-)
 
 watch(
   () => props.open,
   (isOpen) => {
     if (isOpen) {
-      name.value = props.defaultName
+      name.value = ''
       category.value = ''
     }
   },
@@ -52,7 +47,7 @@ function onAdopt() {
           <span class="ro-label">Command</span>
           <div data-ro="command" class="ro mono">{{ command }}</div>
         </div>
-        <label>Name<input v-model="name" data-f="name" class="in" /></label>
+        <label>Name<input v-model="name" data-f="name" class="in" :placeholder="defaultName" /></label>
         <label>Category<input v-model="category" data-f="category" class="in" /></label>
         <p class="note">ChronosUI will wrap this existing cron line so it can record runs — fully reversible.</p>
       </div>

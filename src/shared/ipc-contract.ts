@@ -13,6 +13,7 @@ export const IPC = {
   jobsDelete: 'jobs:delete',
   jobsAdopt: 'jobs:adopt',
   jobsUnadopt: 'jobs:unadopt',
+  jobsForget: 'jobs:forget',
   jobsRunNow: 'jobs:runNow',
   runsListForJob: 'runs:listForJob',
   runsRecent: 'runs:recent',
@@ -21,7 +22,8 @@ export const IPC = {
   runEvent: 'run:event',
   notifyGet: 'notify:get',
   notifySave: 'notify:save',
-  notifyTest: 'notify:test'
+  notifyTest: 'notify:test',
+  jobsManagedCount: 'jobs:managedCount'
 } as const
 
 export interface AppVersion {

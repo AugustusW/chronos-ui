@@ -35,7 +35,7 @@ const chipLabel = (): string => (chipKind() === 'wrapped' ? 'wrapped' : chipKind
       <span v-if="running" data-running class="spin" /> {{ running ? 'running…' : (item.job?.lastRunAt ? relativeTime(+item.job.lastRunAt) : '—') }}
     </div>
     <div class="acts">
-      <button data-run class="btn" type="button" @click="emit('run')">▶ Run</button>
+      <button v-if="item.job" data-run class="btn" type="button" @click="emit('run')">▶ Run</button>
       <button v-if="item.status === 'unmanaged'" class="btn" type="button" @click="emit('adopt')">Adopt</button>
       <button v-else class="btn" type="button" @click="emit('edit')">⋯</button>
     </div>

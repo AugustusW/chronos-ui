@@ -4,9 +4,12 @@ import { reactive, watch } from 'vue'
 import type { CreateJobInput } from '../../../shared/ipc-contract'
 import CronPreview from './CronPreview.vue'
 const props = defineProps<{ open: boolean; initial?: Partial<CreateJobInput>; adopted?: boolean }>()
-const emit = defineEmits<{ save: [v: CreateJobInput]; cancel: []; unadopt: [] }>()
+const emit = defineEmits<{ save: [v: CreateJobInput]; cancel: []; unadopt: []; forget: [] }>()
 function onUnadopt() {
   if (window.confirm('Stop managing this job? It reverts to its original crontab line and removes it from ChronosUI.')) emit('unadopt')
+}
+function onForget() {
+  if (window.confirm('Stop managing this job? ChronosUI will forget it but leave its crontab line untouched.')) emit('forget')
 }
 const f = reactive<CreateJobInput>({ name: '', scheduleExpr: '', command: '', notifyOnFailure: false, ...props.initial })
 watch(() => props.open, (isOpen) => {
@@ -38,7 +41,8 @@ watch(() => props.open, (isOpen) => {
         <label class="notify-row"><input v-model="f.notifyOnFailure" data-test="job-notify" type="checkbox" /> Notify me if this job fails</label>
       </div>
       <footer>
-        <button v-if="adopted" data-unadopt class="btn danger" type="button" @click="onUnadopt">Un-adopt</button>
+        <button v-if="initial && adopted" data-unadopt class="btn danger" type="button" @click="onUnadopt">Un-adopt</button>
+        <button v-if="initial && !adopted" data-forget class="btn danger" type="button" @click="onForget">Forget</button>
         <button class="btn" type="button" @click="emit('cancel')">Cancel</button>
         <button data-save class="btn primary" type="button" @click="emit('save', { ...f })">{{ initial ? 'Save' : 'Create job' }}</button>
       </footer>

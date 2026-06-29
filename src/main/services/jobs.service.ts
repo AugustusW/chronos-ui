@@ -28,7 +28,9 @@ export interface JobsService {
   remove(id: number): Promise<WriteResult>
   adopt(items: AdoptItem[]): Promise<BatchWriteResult>
   unadopt(id: number): Promise<WriteResult>
+  forget(id: number): Promise<WriteResult>
   list(): Promise<ReconcileResult>
+  managedCount(): Promise<number>
 }
 
 export function createJobsService(deps: JobsServiceDeps): JobsService {
@@ -145,6 +147,14 @@ export function createJobsService(deps: JobsServiceDeps): JobsService {
       return r
     },
 
+    async forget(id) {
+      const existing = await repos.jobs.get(id)
+      if (!existing) return { ok: false, reason: 'error', errorCode: 'not_found', error: `no job ${id}` }
+      if (existing.adopted) return { ok: false, reason: 'error', error: 'adopted job — use unadopt to revert the wrap' }
+      await repos.jobs.remove(id) // DB only; crontab untouched (run_logs cascade)
+      return { ok: true }
+    },
+
     async unadopt(id) {
       const existing = await repos.jobs.get(id)
       if (!existing) return { ok: false, reason: 'error', errorCode: 'not_found', error: `no job ${id}` }
@@ -163,6 +173,10 @@ export function createJobsService(deps: JobsServiceDeps): JobsService {
     async list() {
       const [native, dbJobs] = await Promise.all([adapter.list(), repos.jobs.list()])
       return reconcile(native, dbJobs)
+    },
+
+    async managedCount() {
+      return (await repos.jobs.list()).length
     }
   }
 }

@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { _resetSingleton } from '../../src/renderer/src/stores/schedule.store'
 
+const managedCount = vi.fn().mockResolvedValue(1) // default: 1 so existing tests still trigger listJobs
 const listJobs = vi.fn()
 const adoptJobs = vi.fn().mockResolvedValue({ ok: true, adopted: [1] })
 const unadoptJob = vi.fn().mockResolvedValue({ ok: true })
@@ -20,6 +21,8 @@ vi.mock('vue-router', () => ({
 }))
 
 beforeEach(() => {
+  managedCount.mockReset()
+  managedCount.mockResolvedValue(1) // default: 1 so existing tests still trigger listJobs
   listJobs.mockReset()
   adoptJobs.mockReset()
   adoptJobs.mockResolvedValue({ ok: true, adopted: [1] })
@@ -40,7 +43,7 @@ beforeEach(() => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ;(globalThis as any).window = {
     chronos: {
-      listJobs, adoptJobs, unadoptJob,
+      managedCount, listJobs, adoptJobs, unadoptJob,
       createJob, updateJob, enableJob, disableJob, deleteJob, runNowStreaming,
     },
   }

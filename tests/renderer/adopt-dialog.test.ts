@@ -40,28 +40,35 @@ describe('AdoptDialog', () => {
     expect(w.find('textarea[data-f="command"]').exists()).toBe(false)
   })
 
-  it('name input defaults to defaultName prop', () => {
+  it('name input is EMPTY on open (not pre-filled with defaultName)', () => {
     const w = mount(AdoptDialog, { props: BASE_PROPS })
     const nameInput = w.find<HTMLInputElement>('[data-f="name"]')
     expect(nameInput.exists()).toBe(true)
-    expect(nameInput.element.value).toBe('pg_dump')
+    expect(nameInput.element.value).toBe('')
+  })
+
+  it('name input placeholder equals defaultName prop', () => {
+    const w = mount(AdoptDialog, { props: BASE_PROPS })
+    const nameInput = w.find<HTMLInputElement>('[data-f="name"]')
+    expect(nameInput.attributes('placeholder')).toBe('pg_dump')
   })
 
   it('emits adopt with name and category on confirm', async () => {
     const w = mount(AdoptDialog, { props: BASE_PROPS })
+    await w.find('[data-f="name"]').setValue('my_backup')
     await w.find('[data-f="category"]').setValue('backups')
     await w.find('[data-adopt]').trigger('click')
     const emitted = w.emitted('adopt') as unknown[][]
     expect(emitted).toHaveLength(1)
-    expect(emitted[0][0]).toEqual({ name: 'pg_dump', category: 'backups' })
+    expect(emitted[0][0]).toEqual({ name: 'my_backup', category: 'backups' })
   })
 
-  it('emits adopt with empty category when category not set', async () => {
+  it('emits adopt with empty name when name not set', async () => {
     const w = mount(AdoptDialog, { props: BASE_PROPS })
     await w.find('[data-adopt]').trigger('click')
     const emitted = w.emitted('adopt') as unknown[][]
     expect(emitted).toHaveLength(1)
-    expect(emitted[0][0]).toEqual(expect.objectContaining({ name: 'pg_dump' }))
+    expect(emitted[0][0]).toEqual(expect.objectContaining({ name: '' }))
   })
 
   it('emits cancel when Cancel button clicked', async () => {
@@ -76,11 +83,13 @@ describe('AdoptDialog', () => {
     expect(w.emitted('cancel')).toHaveLength(1)
   })
 
-  it('name input reflects updated defaultName when prop changes', async () => {
+  it('placeholder reflects updated defaultName when prop changes', async () => {
     const w = mount(AdoptDialog, { props: BASE_PROPS })
     await w.setProps({ defaultName: 'new_default' })
     const nameInput = w.find<HTMLInputElement>('[data-f="name"]')
-    expect(nameInput.element.value).toBe('new_default')
+    expect(nameInput.attributes('placeholder')).toBe('new_default')
+    // value stays empty (user hasn't typed anything)
+    expect(nameInput.element.value).toBe('')
   })
 
   it('shows the reversibility reassurance note', () => {

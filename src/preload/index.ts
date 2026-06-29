@@ -18,6 +18,7 @@ const api = {
   deleteJob: (id: number): Promise<WriteResult> => ipcRenderer.invoke(IPC.jobsDelete, { id }),
   adoptJobs: (items: AdoptItem[]): Promise<BatchWriteResult> => ipcRenderer.invoke(IPC.jobsAdopt, { items }),
   unadoptJob: (id: number): Promise<WriteResult> => ipcRenderer.invoke(IPC.jobsUnadopt, { id }),
+  forgetJob: (id: number): Promise<WriteResult> => ipcRenderer.invoke(IPC.jobsForget, { id }),
   runNow: (id: number): Promise<RunNowResult> => ipcRenderer.invoke(IPC.jobsRunNow, { id }),
   listRuns: (jobId: number, limit?: number): Promise<RunLog[]> => ipcRenderer.invoke(IPC.runsListForJob, { jobId, limit }),
   recentRuns: (limit?: number): Promise<RunLog[]> => ipcRenderer.invoke(IPC.runsRecent, { limit }),
@@ -30,7 +31,8 @@ const api = {
   },
   getNotifySettings: (): Promise<NotifySettingsDTO> => ipcRenderer.invoke(IPC.notifyGet),
   saveNotifySettings: (input: NotifySaveInput): Promise<SaveResult> => ipcRenderer.invoke(IPC.notifySave, input),
-  testNotify: (): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke(IPC.notifyTest)
+  testNotify: (): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke(IPC.notifyTest),
+  managedCount: (): Promise<number> => ipcRenderer.invoke(IPC.jobsManagedCount)
 }
 
 contextBridge.exposeInMainWorld('chronos', api)
