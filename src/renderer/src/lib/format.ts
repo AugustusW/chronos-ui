@@ -31,3 +31,14 @@ export function formatDuration(ms: number): string {
   const totalSec = Math.round(ms / 1000)
   return `${Math.floor(totalSec / 60)}m ${totalSec % 60}s`
 }
+
+/** Derive a short display name from a shell command string.
+ *  Takes the first whitespace-delimited token and strips any leading path,
+ *  e.g. `/usr/bin/pg_dump assistant | gzip` → `pg_dump`.
+ *  Falls back to `'job'` if the result would be empty.
+ */
+export function deriveJobName(command: string): string {
+  const first = command.trim().split(/\s+/)[0] ?? ''
+  const base = first.split('/').at(-1) ?? ''
+  return base || 'job'
+}

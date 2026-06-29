@@ -130,7 +130,8 @@ export function createJobsService(deps: JobsServiceDeps): JobsService {
             scheduleExpr: it.scheduleExpr,
             command: it.command,
             enabled: true,
-            adopted: false
+            adopted: false,
+            category: it.category ?? null
           })
         )
       }

@@ -3,8 +3,11 @@
 import { reactive, watch } from 'vue'
 import type { CreateJobInput } from '../../../shared/ipc-contract'
 import CronPreview from './CronPreview.vue'
-const props = defineProps<{ open: boolean; initial?: Partial<CreateJobInput> }>()
-const emit = defineEmits<{ save: [v: CreateJobInput]; cancel: [] }>()
+const props = defineProps<{ open: boolean; initial?: Partial<CreateJobInput>; adopted?: boolean }>()
+const emit = defineEmits<{ save: [v: CreateJobInput]; cancel: []; unadopt: [] }>()
+function onUnadopt() {
+  if (window.confirm('Stop managing this job? It reverts to its original crontab line and removes it from ChronosUI.')) emit('unadopt')
+}
 const f = reactive<CreateJobInput>({ name: '', scheduleExpr: '', command: '', notifyOnFailure: false, ...props.initial })
 watch(() => props.open, (isOpen) => {
   if (isOpen) {
@@ -35,6 +38,7 @@ watch(() => props.open, (isOpen) => {
         <label class="notify-row"><input v-model="f.notifyOnFailure" data-test="job-notify" type="checkbox" /> Notify me if this job fails</label>
       </div>
       <footer>
+        <button v-if="adopted" data-unadopt class="btn danger" type="button" @click="onUnadopt">Un-adopt</button>
         <button class="btn" type="button" @click="emit('cancel')">Cancel</button>
         <button data-save class="btn primary" type="button" @click="emit('save', { ...f })">{{ initial ? 'Save' : 'Create job' }}</button>
       </footer>
@@ -51,4 +55,5 @@ label{display:block;font-size:12px;font-weight:500}
 .mono{font-family:var(--p-font-mono)}textarea.in{min-height:46px;resize:vertical}
 .btn{border:1px solid var(--color-border);background:var(--color-surface);color:var(--color-text);border-radius:var(--p-radius);padding:8px 16px;cursor:pointer}
 .btn.primary{background:var(--color-primary);color:var(--color-on-primary);border-color:transparent;font-weight:500}
+.btn.danger{color:#c0392b;border-color:#c0392b;margin-right:auto}
 </style>

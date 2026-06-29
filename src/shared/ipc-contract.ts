@@ -72,6 +72,7 @@ export interface AdoptItem {
   name?: string
   scheduleExpr: string
   command: string
+  category?: string
 }
 
 /** Manual-run outcome (architect MEDIUM #5 — discriminated union instead of a faked RunLog). */

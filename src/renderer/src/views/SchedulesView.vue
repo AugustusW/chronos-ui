@@ -4,22 +4,30 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useScheduleStore } from '../stores/schedule.store'
 import { api } from '../ipc/api'
-import type { CreateJobInput, Job, JobListItem, AdoptItem } from '../../../shared/ipc-contract'
+import { deriveJobName } from '../lib/format'
+import type { CreateJobInput, Job, JobListItem } from '../../../shared/ipc-contract'
 import CategoryFilter from '../components/CategoryFilter.vue'
 import BatchActionBar from '../components/BatchActionBar.vue'
 import JobRow from '../components/JobRow.vue'
 import SkeletonRows from '../components/SkeletonRows.vue'
 import EmptyState from '../components/EmptyState.vue'
 import JobEditor from '../components/JobEditor.vue'
+import AdoptDialog from '../components/AdoptDialog.vue'
 const router = useRouter()
 const store = useScheduleStore()
 const loading = ref(true)
 const editorOpen = ref(false)
 const editingId = ref<number | null>(null)
+const editingAdopted = ref(false)
 const editorInitial = ref<Partial<CreateJobInput> | undefined>(undefined)
 const saveError = ref<string | null>(null)
 const batchState = ref<{ done: number; total: number } | null>(null)
 let batchCancel = false
+// Adopt dialog state
+const adoptOpen = ref(false)
+const adoptTarget = ref<JobListItem | null>(null)
+// Status feedback (success or error)
+const statusMsg = ref<{ kind: 'ok' | 'err'; text: string } | null>(null)
 onMounted(async () => { await store.refresh(); loading.value = false })
 const counts = computed<Record<string, number>>(() => {
   const c: Record<string, number> = { All: store.items.length }
@@ -70,11 +78,14 @@ async function batchDelete(): Promise<void> {
   exitSelect()
 }
 function openNew(): void {
+  statusMsg.value = null
   editingId.value = null
   editorInitial.value = undefined
+  editingAdopted.value = false
   editorOpen.value = true
 }
 function openEdit(job: Job): void {
+  statusMsg.value = null
   editingId.value = job.id
   editorInitial.value = {
     name: job.name,
@@ -84,6 +95,7 @@ function openEdit(job: Job): void {
     workingDir: job.workingDir ?? undefined,
     timeoutSec: job.timeoutSec ?? undefined,
   }
+  editingAdopted.value = job.adopted ?? false
   editorOpen.value = true
 }
 async function onSave(input: CreateJobInput): Promise<void> {
@@ -103,14 +115,50 @@ async function onSave(input: CreateJobInput): Promise<void> {
     saveError.value = err instanceof Error ? err.message : 'Failed to save job'
   }
 }
-async function onAdopt(it: JobListItem): Promise<void> {
+function onAdopt(it: JobListItem): void {
   if (!it.native) return
-  // #8: carry the native name (Windows Task Scheduler) into the adopted job; cron has none → blank.
-  const item: AdoptItem = { name: it.native.name, scheduleExpr: it.native.scheduleExpr, command: it.native.command }
+  statusMsg.value = null
+  adoptTarget.value = it
+  adoptOpen.value = true
+}
+async function onAdoptConfirm({ name, category }: { name: string; category?: string }): Promise<void> {
+  if (!adoptTarget.value?.native) return
+  statusMsg.value = null
   try {
-    await api.adoptJobs([item])
+    const r = await api.adoptJobs([{
+      name,
+      scheduleExpr: adoptTarget.value.native.scheduleExpr,
+      command: adoptTarget.value.native.command,
+      category,
+    }])
+    if (!r.ok || r.adopted.length === 0) {
+      statusMsg.value = { kind: 'err', text: `Adopt failed: ${r.error ?? r.reason ?? 'unknown error'}` }
+      return
+    }
+    statusMsg.value = { kind: 'ok', text: `Adopted "${name}" ✓` }
+    adoptOpen.value = false
     await store.refresh()
-  } catch { /* best-effort */ }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    statusMsg.value = { kind: 'err', text: `Adopt failed: ${msg}` }
+  }
+}
+async function onUnadopt(): Promise<void> {
+  if (editingId.value == null) return
+  statusMsg.value = null
+  try {
+    const w = await api.unadoptJob(editingId.value)
+    if (!w.ok) {
+      statusMsg.value = { kind: 'err', text: `Un-adopt failed: ${w.error ?? w.reason ?? 'unknown error'}` }
+      return
+    }
+    statusMsg.value = { kind: 'ok', text: 'Un-adopted ✓' }
+    editorOpen.value = false
+    await store.refresh()
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    statusMsg.value = { kind: 'err', text: `Un-adopt failed: ${msg}` }
+  }
 }
 async function onScan(): Promise<void> {
   // store.refresh() owns loading/error state and never throws; errors surface via store.scanError.
@@ -124,9 +172,26 @@ async function onScan(): Promise<void> {
       <button class="btn" :class="{ on: store.selectMode }" type="button" @click="store.selectMode = !store.selectMode">☑ Select</button>
       <button class="btn primary" type="button" @click="openNew">＋ New job</button>
     </div>
-    <JobEditor :open="editorOpen" :initial="editorInitial" @save="onSave" @cancel="editorOpen = false" />
+    <AdoptDialog
+      :open="adoptOpen"
+      :schedule="adoptTarget?.native?.scheduleExpr ?? ''"
+      :command="adoptTarget?.native?.command ?? ''"
+      :default-name="adoptTarget?.native ? (adoptTarget.native.name || deriveJobName(adoptTarget.native.command)) : ''"
+      @adopt="onAdoptConfirm"
+      @cancel="adoptOpen = false"
+    />
+    <JobEditor
+      :open="editorOpen"
+      :initial="editorInitial"
+      :adopted="editingAdopted"
+      @save="onSave"
+      @cancel="editorOpen = false"
+      @unadopt="onUnadopt"
+    />
     <p v-if="saveError" class="save-err">{{ saveError }}</p>
     <p v-if="store.scanError" class="save-err">Scan failed: {{ store.scanError }}</p>
+    <p v-if="statusMsg && statusMsg.kind === 'err'" class="save-err">{{ statusMsg.text }}</p>
+    <p v-if="statusMsg && statusMsg.kind === 'ok'" class="status-ok">{{ statusMsg.text }}</p>
     <template v-if="isEmpty"><EmptyState :scanning="store.loading" :scanned="store.hasScanned && !store.scanError" @new="openNew" @scan="onScan" /></template>
     <template v-else>
       <CategoryFilter :categories="store.categories" :active="store.categoryFilter" :counts="counts" @change="store.setCategory" />
@@ -163,4 +228,5 @@ async function onScan(): Promise<void> {
 .ghead{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--color-text-muted);margin:var(--p-space-3) 4px var(--p-space-2)}
 .gc{background:var(--color-border);border-radius:20px;font-size:10px;padding:0 7px}
 .save-err{color:var(--color-danger,#e05);font-size:12px;padding:var(--p-space-2) var(--p-space-4);margin:0}
+.status-ok{color:var(--color-success,#2a9d4e);font-size:12px;padding:var(--p-space-2) var(--p-space-4);margin:0}
 </style>

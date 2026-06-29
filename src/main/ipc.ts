@@ -44,7 +44,7 @@ function isCreateInput(p: unknown): p is CreateJobInput {
 function isAdoptItem(p: unknown): p is AdoptItem {
   if (!p || typeof p !== 'object') return false
   const o = p as Record<string, unknown>
-  return isLine(o.scheduleExpr) && isLine(o.command) && isOptStr(o.name)
+  return isLine(o.scheduleExpr) && isLine(o.command) && isOptStr(o.name) && (o.category === undefined || isStr(o.category))
 }
 function isUpdateChanges(c: unknown): c is UpdateJobChanges {
   if (!c || typeof c !== 'object') return false

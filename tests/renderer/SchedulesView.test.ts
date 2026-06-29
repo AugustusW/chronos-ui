@@ -8,6 +8,7 @@ const listJobs = vi.fn()
 const createJob = vi.fn().mockResolvedValue({ ok: true })
 const updateJob = vi.fn().mockResolvedValue({ ok: true })
 const adoptJobs = vi.fn().mockResolvedValue([])
+const unadoptJob = vi.fn().mockResolvedValue({ ok: true })
 const enableJob = vi.fn().mockResolvedValue({ ok: true })
 const disableJob = vi.fn().mockResolvedValue({ ok: true })
 const deleteJob = vi.fn().mockResolvedValue({ ok: true })
@@ -28,6 +29,8 @@ beforeEach(() => {
   updateJob.mockResolvedValue({ ok: true })
   adoptJobs.mockReset()
   adoptJobs.mockResolvedValue([])
+  unadoptJob.mockReset()
+  unadoptJob.mockResolvedValue({ ok: true })
   enableJob.mockReset()
   enableJob.mockResolvedValue({ ok: true })
   disableJob.mockReset()
@@ -37,7 +40,7 @@ beforeEach(() => {
   runNowStreaming.mockReset()
   runNowStreaming.mockResolvedValue(undefined)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  ;(globalThis as any).window = { chronos: { listJobs, createJob, updateJob, adoptJobs, enableJob, disableJob, deleteJob, runNowStreaming } }
+  ;(globalThis as any).window = { chronos: { listJobs, createJob, updateJob, adoptJobs, unadoptJob, enableJob, disableJob, deleteJob, runNowStreaming } }
   pushSpy.mockClear()
   // Reset the store singleton so each test gets a fresh store
   _resetSingleton()
@@ -234,17 +237,17 @@ describe('SchedulesView', () => {
       expect(listJobs.mock.calls.length).toBe(listCallsBefore)
     })
 
-    it('JobRow @adopt for an unmanaged row calls adoptJobs + refreshes', async () => {
+    it('JobRow @adopt for an unmanaged row opens AdoptDialog (does NOT call adoptJobs immediately)', async () => {
       listJobs.mockResolvedValue(MIXED_RESPONSE)
       const w = mount(SchedulesView)
       await flushPromises()
       const unmanagedRow = w.findAllComponents({ name: 'JobRow' }).find((r) => r.props('item').status === 'unmanaged')!
       expect(unmanagedRow).toBeTruthy()
-      const listCallsBefore = listJobs.mock.calls.length
       unmanagedRow.vm.$emit('adopt')
       await flushPromises()
-      expect(adoptJobs).toHaveBeenCalledWith([{ scheduleExpr: '0 6 * * *', command: '/u.sh' }])
-      expect(listJobs.mock.calls.length).toBeGreaterThan(listCallsBefore)
+      // Adopt now goes through AdoptDialog — not called immediately
+      expect(adoptJobs).not.toHaveBeenCalled()
+      expect(w.findComponent({ name: 'AdoptDialog' }).props('open')).toBe(true)
     })
   })
 
