@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { ipcMain } from 'electron'
 import { IPC, type AppVersion } from '../shared/ipc-contract'
+import { isNotifyTokenFormat, isChatIdFormat } from '../shared/notify-validation'
 import type { CreateJobInput, UpdateJobChanges, AdoptItem, ReconcileResult, RunNowResult } from '../shared/ipc-contract'
 import type { JobsService } from './services/jobs.service'
 import type { NotifyService, NotifySaveInput } from './services/notify.service'
@@ -127,12 +128,10 @@ const isWindow = (v: unknown): v is number => typeof v === 'number' && Number.is
 // The bot token is interpolated into the Telegram API URL path (Go side: fmt.Sprintf(".../bot%s/...")),
 // so a token carrying '/', '..' or query chars could reshape the request path. The chatId selects the
 // notification recipient. Validate both formats at the IPC boundary so a compromised renderer can't
-// smuggle a malformed value into the URL or redirect alerts (code review #7). Token: "<botId>:<auth>";
-// chatId: signed integer (groups are negative) or "@channelusername".
-const NOTIFY_TOKEN_RE = /^\d+:[A-Za-z0-9_-]+$/
-const CHAT_ID_RE = /^-?\d+$|^@\w+$/
-const isNotifyToken = (v: unknown): v is string => isStr(v) && NOTIFY_TOKEN_RE.test(v)
-const isChatId = (v: unknown): v is string => isStr(v) && CHAT_ID_RE.test(v)
+// smuggle a malformed value into the URL or redirect alerts (code review #7). Formats are shared with
+// notify.service (testSend) via ../shared/notify-validation so every URL-building site agrees.
+const isNotifyToken = (v: unknown): v is string => isStr(v) && isNotifyTokenFormat(v)
+const isChatId = (v: unknown): v is string => isStr(v) && isChatIdFormat(v)
 function isNotifyInput(p: unknown): p is NotifySaveInput {
   if (!p || typeof p !== 'object') return false
   const o = p as Record<string, unknown>

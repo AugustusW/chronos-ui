@@ -4,11 +4,12 @@ import { buildCspContent, isInternalNavigation, installNavigationHardening, type
 
 describe('buildCspContent (code review #2)', () => {
   const csp = buildCspContent()
-  it('locks the default origin to self and closes object/frame/form sinks', () => {
+  it('locks the default origin to self and closes object/frame/form/worker sinks', () => {
     expect(csp).toContain("default-src 'self'")
     expect(csp).toContain("object-src 'none'")
     expect(csp).toContain("frame-src 'none'")
     expect(csp).toContain("base-uri 'self'")
+    expect(csp).toContain("worker-src 'none'")
   })
   it('never allows unsafe-eval, and does not relax script-src to inline', () => {
     expect(csp).not.toContain('unsafe-eval')
@@ -25,9 +26,17 @@ describe('isInternalNavigation (code review #3)', () => {
     expect(isInternalNavigation('http://localhost:5173/x', 'http://localhost:5173/')).toBe(true)
     expect(isInternalNavigation('https://evil.example/', 'http://localhost:5173/')).toBe(false)
   })
-  it('allows file:// within a packaged build, denies http from file://', () => {
-    expect(isInternalNavigation('file:///app/renderer/index.html', 'file:///app/renderer/index.html')).toBe(true)
-    expect(isInternalNavigation('https://evil.example/', 'file:///app/renderer/index.html')).toBe(false)
+  it('pins to the app file in a packaged build: same file (any hash) allowed, other files denied (code review #1)', () => {
+    const app = 'file:///app/renderer/index.html'
+    expect(isInternalNavigation('file:///app/renderer/index.html', app)).toBe(true)
+    // a reload landing on the same file with a hash route is still internal
+    expect(isInternalNavigation('file:///app/renderer/index.html#/run-history', app)).toBe(true)
+    // any OTHER local file is denied
+    expect(isInternalNavigation('file:///app/renderer/other.html', app)).toBe(false)
+    expect(isInternalNavigation('file:///etc/passwd', app)).toBe(false)
+    // a file://host/ form (non-empty host) is denied
+    expect(isInternalNavigation('file://evil.example/app/renderer/index.html', app)).toBe(false)
+    expect(isInternalNavigation('https://evil.example/', app)).toBe(false)
   })
   it('denies a malformed target', () => {
     expect(isInternalNavigation('not a url', 'http://localhost:5173/')).toBe(false)

@@ -4,6 +4,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import type { Repositories } from '../db/repositories'
 import type { FlushScheduler } from './notify-flush-launchd'
 import { NOTIFY_TOKEN_FILE, writeNotifyToken } from './notify-secret'
+import { isNotifyTokenFormat, isChatIdFormat } from '../../shared/notify-validation'
 
 export type NotifySettingsDTO = { enabled: boolean; chatId: string | null; windowMin: number; tokenSet: boolean }
 export type NotifySaveInput = { enabled: boolean; chatId: string | null; windowMin: number; token?: string }
@@ -85,8 +86,13 @@ export function createNotifyService(deps: NotifyServiceDeps): NotifyService {
     async testSend() {
       const token = readToken()
       if (!token) return { ok: false, error: 'No bot token saved' }
+      // The token is read from disk and interpolated into the API URL path below — re-validate its
+      // format here so a tampered .secret file can't reshape the request, keeping the same
+      // defense-in-depth invariant as the IPC + Go boundaries (code review #2).
+      if (!isNotifyTokenFormat(token)) return { ok: false, error: 'Saved bot token has an invalid format' }
       const s = await deps.repos.notifySettings.get()
       if (!s.chatId) return { ok: false, error: 'No chat id saved' }
+      if (!isChatIdFormat(s.chatId)) return { ok: false, error: 'Saved chat id has an invalid format' }
       try {
         const body = new URLSearchParams({ chat_id: s.chatId, text: '✅ ChronosUI test message' })
         const resp = await deps.fetchFn(`${TELEGRAM_BASE}/bot${token}/sendMessage`, { method: 'POST', body })
