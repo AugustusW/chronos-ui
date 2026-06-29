@@ -24,6 +24,7 @@ export function buildCspContent(): string {
     "font-src 'self'",
     "connect-src 'self'",
     "object-src 'none'",
+    "worker-src 'none'",
     "base-uri 'self'",
     "frame-src 'none'",
     "form-action 'none'"
@@ -48,7 +49,13 @@ export function isInternalNavigation(targetUrl: string, appUrl: string): boolean
   } catch {
     return false
   }
-  if (app.protocol === 'file:') return target.protocol === 'file:'
+  if (app.protocol === 'file:') {
+    // Packaged build: pin to the app's OWN file — same (empty) host AND same path. Any other file://
+    // document (including a file://host/ form) is denied, so a hijacked renderer can't repoint the
+    // window at e.g. file:///etc/passwd. A differing hash/query on the same file is still allowed so an
+    // in-app reload works (code review #1).
+    return target.protocol === 'file:' && target.host === app.host && target.pathname === app.pathname
+  }
   return target.origin === app.origin
 }
 

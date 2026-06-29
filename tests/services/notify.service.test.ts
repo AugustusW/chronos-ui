@@ -67,7 +67,7 @@ describe('notify service', () => {
   it('testSend posts to sendMessage and returns ok', async () => {
     const deps = baseDeps()
     const svc = createNotifyService(deps)
-    await svc.saveSettings({ enabled: true, chatId: '42', windowMin: 0, token: 'BOT:1' })
+    await svc.saveSettings({ enabled: true, chatId: '42', windowMin: 0, token: '123456789:ABCdef_-' })
     const r = await svc.testSend()
     expect(r.ok).toBe(true)
     expect(deps.fetchFn).toHaveBeenCalled()
@@ -79,6 +79,17 @@ describe('notify service', () => {
     await svc.saveSettings({ enabled: true, chatId: '42', windowMin: 0 }) // no token
     const r = await svc.testSend()
     expect(r.ok).toBe(false)
+  })
+
+  it('testSend rejects a tampered/invalid-format token without hitting the network (code review #2)', async () => {
+    const deps = baseDeps()
+    const svc = createNotifyService(deps)
+    // saveSettings does not validate (the IPC boundary does); simulate a hand-tampered .secret file
+    // whose value would reshape the api.telegram.org URL path.
+    await svc.saveSettings({ enabled: true, chatId: '42', windowMin: 0, token: 'evil/../sendMessage' })
+    const r = await svc.testSend()
+    expect(r.ok).toBe(false)
+    expect(deps.fetchFn).not.toHaveBeenCalled()
   })
 
   it('pre-save drain: spawnFlush is awaited BEFORE notifySettings.save when disabling from batched state', async () => {

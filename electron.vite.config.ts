@@ -12,6 +12,10 @@ const injectCsp = {
   name: 'chronos-inject-csp',
   apply: 'build' as const,
   transformIndexHtml(html: string): string {
+    // Fail the build loudly rather than silently shipping a renderer with no CSP (code review #6).
+    if (!html.includes('</head>')) {
+      throw new Error('[chronos-inject-csp] index.html has no </head>; CSP meta could not be injected')
+    }
     const meta = `<meta http-equiv="Content-Security-Policy" content="${buildCspContent()}" />`
     return html.replace('</head>', `    ${meta}\n  </head>`)
   }
