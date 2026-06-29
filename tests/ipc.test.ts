@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { handleGetVersion, handleJobsCreate, handleJobsUpdate, handleJobsAdopt, handleJobsRunNowStreaming, handleJobsRunBatchCancel, handleRunsRecent, MAX_BATCH_ADOPT, MAX_RUN_LIST_LIMIT, type IpcDeps } from '../src/main/ipc'
+import { handleGetVersion, handleJobsCreate, handleJobsUpdate, handleJobsAdopt, handleJobsRunNowStreaming, handleJobsRunBatchCancel, handleRunsRecent, handleNotifySave, MAX_BATCH_ADOPT, MAX_RUN_LIST_LIMIT, type IpcDeps } from '../src/main/ipc'
 
 describe('handleGetVersion', () => {
   it('returns the app name and a semver-shaped version', () => {
@@ -110,5 +110,48 @@ describe('Plan 6 IPC handlers', () => {
     const d = { ...deps(), cancelBatch: () => { called = true } } as any
     handleJobsRunBatchCancel(d)
     expect(called).toBe(true)
+  })
+})
+
+describe('handleJobsCreate validation — carriage return (code review #10)', () => {
+  it('rejects a command with an embedded carriage return (cron-line injection)', async () => {
+    const r = await handleJobsCreate(deps(), { name: 'x', scheduleExpr: '* * * * *', command: '/b.sh\rinjected' })
+    expect(r.ok).toBe(false)
+    expect(r.errorCode).toBe('invalid_input')
+  })
+})
+
+describe('handleNotifySave validation — token / chatId format (code review #7)', () => {
+  const notifyDeps = (track: { saved: boolean }): Partial<IpcDeps> => ({
+    notify: {
+      getSettings: async () => ({ enabled: false, chatId: null, windowMin: 0, tokenSet: false }),
+      saveSettings: async () => { track.saved = true; return { ok: true } },
+      testSend: async () => ({ ok: true })
+    } as unknown as IpcDeps['notify']
+  })
+
+  it('rejects a malformed bot token (slash — path-injection vector) without saving', async () => {
+    const track = { saved: false }
+    const r = await handleNotifySave(deps(notifyDeps(track)), { enabled: true, chatId: '123', windowMin: 0, token: 'evil/../sendMessage' })
+    expect(r.ok).toBe(false)
+    expect(track.saved).toBe(false)
+  })
+  it('rejects a malformed chatId without saving', async () => {
+    const track = { saved: false }
+    const r = await handleNotifySave(deps(notifyDeps(track)), { enabled: true, chatId: 'not a chat', windowMin: 0, token: '123456789:ABCdef_-' })
+    expect(r.ok).toBe(false)
+    expect(track.saved).toBe(false)
+  })
+  it('accepts a well-formed token + numeric (group) chatId', async () => {
+    const track = { saved: false }
+    const r = await handleNotifySave(deps(notifyDeps(track)), { enabled: true, chatId: '-1001234567', windowMin: 0, token: '123456789:ABCdef_GHIjkl-mno' })
+    expect(r.ok).toBe(true)
+    expect(track.saved).toBe(true)
+  })
+  it('accepts an @channel chatId and an omitted token (no token change)', async () => {
+    const track = { saved: false }
+    const r = await handleNotifySave(deps(notifyDeps(track)), { enabled: true, chatId: '@mychannel', windowMin: 0 })
+    expect(r.ok).toBe(true)
+    expect(track.saved).toBe(true)
   })
 })
