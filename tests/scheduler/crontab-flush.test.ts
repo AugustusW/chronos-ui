@@ -21,7 +21,7 @@ describe('crontab flush entry', () => {
     const r = await a.installFlushEntry(5)
     expect(r.ok).toBe(true)
     expect(f.table()).toContain('# chronos:notify-flush')
-    expect(f.table()).toMatch(/\*\/5 \* \* \* \* \/opt\/schedmgr notify-flush --db /)
+    expect(f.table()).toMatch(/\*\/5 \* \* \* \* '\/opt\/schedmgr' notify-flush --db /)
   })
 
   it('installFlushEntry is idempotent (replaces, no duplicate)', async () => {
