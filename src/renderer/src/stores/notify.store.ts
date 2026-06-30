@@ -6,6 +6,7 @@ export function createNotifyStore() {
     enabled: false,
     chatId: '' as string,
     windowMin: 0,
+    includeStderr: false, // opt-in: include failed-job stderr tail in immediate alerts
     tokenSet: false,
     tokenStorage: null as 'keychain' | 'file' | null, // where the saved token lives (file = unencrypted)
     token: '' as string, // write-only; cleared after save
@@ -20,6 +21,7 @@ export function createNotifyStore() {
     state.enabled = s.enabled
     state.chatId = s.chatId ?? ''
     state.windowMin = s.windowMin
+    state.includeStderr = s.includeStderr
     state.tokenSet = s.tokenSet
     state.tokenStorage = s.tokenStorage
   }
@@ -32,6 +34,7 @@ export function createNotifyStore() {
         enabled: state.enabled,
         chatId: state.chatId || null,
         windowMin: state.windowMin,
+        includeStderr: state.includeStderr,
         token: state.token ? state.token : undefined
       })
       if (!r.ok) {
@@ -64,6 +67,8 @@ export function createNotifyStore() {
     set chatId(v: string) { state.chatId = v },
     get windowMin() { return state.windowMin },
     set windowMin(v: number) { state.windowMin = v },
+    get includeStderr() { return state.includeStderr },
+    set includeStderr(v: boolean) { state.includeStderr = v },
     get token() { return state.token },
     set token(v: string) { state.token = v },
     get tokenSet() { return state.tokenSet },
