@@ -37,6 +37,25 @@ function normalize(config: BackendConfig | string): BackendConfig {
 }
 
 /**
+ * Decide the pg Pool TLS options for a DSN (review #11): if the DSN already specifies `sslmode`,
+ * defer to it; otherwise a NON-local host must use TLS — a remote Postgres should never be reached in
+ * cleartext (credentials + data would cross the network unencrypted) — while a local connection stays
+ * plaintext. Exported for testing; node-postgres reads `ssl` from the Pool config.
+ */
+export function pgPoolOptions(dsn: string): { connectionString: string; ssl?: { rejectUnauthorized: boolean } } {
+  let host = ''
+  try {
+    host = new URL(dsn).hostname
+  } catch {
+    /* non-URL DSN (e.g. key=value form) → treat as local / no override */
+  }
+  const hasSslmode = /[?&]sslmode=/i.test(dsn)
+  const isLocal = host === '' || host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]'
+  if (hasSslmode || isLocal) return { connectionString: dsn }
+  return { connectionString: dsn, ssl: { rejectUnauthorized: true } }
+}
+
+/**
  * Open a ChronosUI database. SQLite is the default backend (zero-config; a path string or
  * `{ dialect: 'sqlite', path }`). PostgreSQL (`{ dialect: 'postgres', dsn }`) opens a `pg.Pool`.
  * SQLite pragmas (WAL, busy_timeout, foreign_keys, journal_size_limit, synchronous) are for
@@ -45,7 +64,7 @@ function normalize(config: BackendConfig | string): BackendConfig {
 export function createDatabase(config: BackendConfig | string): DatabaseHandle {
   const cfg = normalize(config)
   if (cfg.dialect === 'postgres') {
-    const pool = new Pool({ connectionString: cfg.dsn })
+    const pool = new Pool(pgPoolOptions(cfg.dsn))
     const db = drizzlePg(pool, { schema: pgSchema })
     return {
       dialect: 'postgres',

@@ -33,22 +33,26 @@ export function createPgRunLogsRepo(db: PgDb) {
         stderr?: string
       }
     ): Promise<RunLog | undefined> {
-      const [existing] = await db.select().from(runLogs).where(eq(runLogs.id, id))
-      if (!existing) return undefined
-      const endedAt = input.endedAt ?? new Date()
-      const [row] = await db
-        .update(runLogs)
-        .set({
-          result: input.result,
-          endedAt,
-          durationMs: endedAt.getTime() - existing.startedAt.getTime(),
-          exitCode: input.exitCode,
-          stdout: input.stdout === undefined ? undefined : keepLastBytes(input.stdout),
-          stderr: input.stderr === undefined ? undefined : keepLastBytes(input.stderr)
-        })
-        .where(eq(runLogs.id, id))
-        .returning()
-      return row as RunLog | undefined
+      // Atomic read-then-write: two pool checkouts (the prior SELECT + UPDATE) could interleave with
+      // another writer; a single transaction pins them to one connection + one atomic unit (review #11).
+      return db.transaction(async (tx) => {
+        const [existing] = await tx.select().from(runLogs).where(eq(runLogs.id, id))
+        if (!existing) return undefined
+        const endedAt = input.endedAt ?? new Date()
+        const [row] = await tx
+          .update(runLogs)
+          .set({
+            result: input.result,
+            endedAt,
+            durationMs: endedAt.getTime() - existing.startedAt.getTime(),
+            exitCode: input.exitCode,
+            stdout: input.stdout === undefined ? undefined : keepLastBytes(input.stdout),
+            stderr: input.stderr === undefined ? undefined : keepLastBytes(input.stderr)
+          })
+          .where(eq(runLogs.id, id))
+          .returning()
+        return row as RunLog | undefined
+      })
     },
     async listRecent(limit = 50): Promise<RunLog[]> {
       return (await db
