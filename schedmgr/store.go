@@ -133,9 +133,10 @@ func (s *store) updateJobCache(jobID int64, lastRunAt time.Time, lastResult stri
 
 // notifySettings holds the single row from notify_settings (id=1).
 type notifySettings struct {
-	enabled   bool
-	chatID    string
-	windowMin int
+	enabled       bool
+	chatID        string
+	windowMin     int
+	includeStderr bool
 }
 
 // outboxRow is a pending-outbox record to be sent via Telegram.
@@ -152,12 +153,12 @@ type outboxRow struct {
 func (s *store) readNotifySettings() (notifySettings, bool, error) {
 	var ns notifySettings
 	var chat sql.NullString
-	q := `SELECT enabled, chatId, windowMin FROM notify_settings WHERE id = 1`
+	q := `SELECT enabled, chatId, windowMin, includeStderr FROM notify_settings WHERE id = 1`
 	if s.dialect == dialectPostgres {
-		q = `SELECT enabled, "chatId", "windowMin" FROM notify_settings WHERE id = 1`
+		q = `SELECT enabled, "chatId", "windowMin", "includeStderr" FROM notify_settings WHERE id = 1`
 	}
 	row := s.db.QueryRow(q)
-	if err := row.Scan(&ns.enabled, &chat, &ns.windowMin); err != nil {
+	if err := row.Scan(&ns.enabled, &chat, &ns.windowMin, &ns.includeStderr); err != nil {
 		if err == sql.ErrNoRows {
 			return notifySettings{}, false, nil
 		}

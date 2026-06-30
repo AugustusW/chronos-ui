@@ -15,6 +15,13 @@
       "when": 1782646024666,
       "tag": "0001_medical_changeling",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1782779403261,
+      "tag": "0002_sparkling_romulus",
+      "breakpoints": true
     }
   ]
 }

@@ -54,6 +54,9 @@ export const notifySettings = sqliteTable('notify_settings', {
   enabled: integer('enabled', { mode: 'boolean' }).notNull().default(false),
   chatId: text('chatId'),
   windowMin: integer('windowMin').notNull().default(0), // 0 = immediate; ≥1 = batch every N min
+  // Opt-in (default off): include the failed job's stderr tail in immediate alerts. Off by default
+  // because stderr can carry secrets/paths — sending it to Telegram is an explicit user choice.
+  includeStderr: integer('includeStderr', { mode: 'boolean' }).notNull().default(false),
   updatedAt: integer('updatedAt', { mode: 'timestamp_ms' }).notNull().$defaultFn(() => new Date())
 })
 

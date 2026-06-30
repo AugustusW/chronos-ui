@@ -58,7 +58,13 @@ func notifyAfterRun(d notifyDeps, jobID int64, result string, exitCode int, ende
 		v := int64(exitCode)
 		ec = &v
 	}
-	text := formatImmediate(name, result, ec, 0, ended, stderrTail(stderr, 10, 600))
+	// stderr is opt-in (default off): it can carry secrets/paths, so only include the tail when the
+	// user explicitly enabled it. The batched digest path never includes stderr at all. (code review #6)
+	tail := ""
+	if ns.includeStderr {
+		tail = stderrTail(stderr, 10, 600)
+	}
+	text := formatImmediate(name, result, ec, 0, ended, tail)
 	if err := d.send(token, ns.chatID, text); err != nil {
 		fmt.Fprintf(os.Stderr, "schedmgr: notify send failed: %v\n", err)
 	}
