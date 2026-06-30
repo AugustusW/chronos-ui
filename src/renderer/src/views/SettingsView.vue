@@ -15,6 +15,7 @@ onMounted(() => n.load())
       <h2>Notifications (Telegram)</h2>
       <label class="row"><input v-model="n.enabled" data-test="notify-enable" type="checkbox" /> Enable Telegram notifications</label>
       <label class="row">Bot token <input v-model="n.token" data-test="notify-token" type="password" :placeholder="n.tokenSet ? '•••••• (saved)' : 'paste bot token'" /></label>
+      <div v-if="n.tokenStorage === 'file'" class="row warn" data-test="notify-token-storage-warn">⚠️ This token is stored unencrypted on disk (your OS keychain is unavailable on this platform). Anyone with access to your user account can read it.</div>
       <label class="row">Chat id <input v-model="n.chatId" data-test="notify-chat" type="text" placeholder="e.g. 123456789" /></label>
       <label class="row">Batch window (min) <input v-model.number="n.windowMin" data-test="notify-window" type="number" min="0" /> <span class="muted">(0 = immediate)</span></label>
       <div class="row">
@@ -32,5 +33,6 @@ onMounted(() => n.load())
 h1{font-size:16px}h2{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--color-text-muted);margin-top:var(--p-space-4)}
 .row{display:flex;align-items:center;gap:10px;padding:8px 0}.muted{color:var(--color-text-muted)}
 .err{color:var(--color-danger)}
+.warn{color:var(--color-warn-text);font-size:12px;line-height:1.4}
 input[type=text],input[type=password],input[type=number]{flex:1;min-width:0}
 </style>

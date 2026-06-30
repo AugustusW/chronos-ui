@@ -7,6 +7,7 @@ export function createNotifyStore() {
     chatId: '' as string,
     windowMin: 0,
     tokenSet: false,
+    tokenStorage: null as 'keychain' | 'file' | null, // where the saved token lives (file = unencrypted)
     token: '' as string, // write-only; cleared after save
     saving: false,
     testing: false,
@@ -20,6 +21,7 @@ export function createNotifyStore() {
     state.chatId = s.chatId ?? ''
     state.windowMin = s.windowMin
     state.tokenSet = s.tokenSet
+    state.tokenStorage = s.tokenStorage
   }
 
   async function save(): Promise<void> {
@@ -36,7 +38,7 @@ export function createNotifyStore() {
         state.error = 'Save failed'
       } else {
         state.token = ''
-        if (r.settings) state.tokenSet = r.settings.tokenSet
+        if (r.settings) { state.tokenSet = r.settings.tokenSet; state.tokenStorage = r.settings.tokenStorage }
         if (r.flushWarning) state.error = r.flushWarning
       }
     } finally {
@@ -65,6 +67,7 @@ export function createNotifyStore() {
     get token() { return state.token },
     set token(v: string) { state.token = v },
     get tokenSet() { return state.tokenSet },
+    get tokenStorage() { return state.tokenStorage },
     get saving() { return state.saving },
     get testing() { return state.testing },
     get testResult() { return state.testResult },
