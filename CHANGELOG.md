@@ -6,6 +6,8 @@ All notable changes to ChronosUI are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.1.5] — 2026-06-30
+
 ### Security
 - Store the Telegram bot token in the OS keychain (macOS Keychain / Linux Secret Service) instead of
   a plaintext file; Windows falls back to a `0600` file with a clear "unencrypted" warning in Settings.
