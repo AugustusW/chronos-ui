@@ -45,7 +45,9 @@ export async function runNow(id: number, deps: RunNowDeps): Promise<RunNowResult
   const grace = deps.graceMs ?? 30_000
   const floor = deps.hardFloorMs ?? 60_000
   const cap = Math.max((job.timeoutSec ?? 0) * 1000 + grace, floor)
-  const delay = deps.delay ?? ((ms, cb) => setTimeout(cb, ms))
+  // unref the cap timer so a normal exit doesn't leave it holding the event loop open for the full
+  // cap (it just resolves an already-settled race). Matches runNowStreaming (review #9 follow-up).
+  const delay = deps.delay ?? ((ms, cb) => { setTimeout(cb, ms).unref?.() })
 
   type Outcome = { t: 'exit' } | { t: 'timeout' } | { t: 'error'; err: Error }
   const exited = new Promise<Outcome>((resolve) => child.on('exit', () => resolve({ t: 'exit' })))
