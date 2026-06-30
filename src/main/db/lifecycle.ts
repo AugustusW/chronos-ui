@@ -43,6 +43,8 @@ export function startRetentionSweep(
   const days = opts.days ?? RUN_LOG_RETENTION_DAYS
   const intervalMs = opts.intervalMs ?? DAY_MS
   const now = opts.now ?? Date.now
+  // No concurrent-run guard: the daily interval dwarfs any realistic prune duration, the sqlite path
+  // is synchronous (can't overlap), and an overlapping age-based DELETE is idempotent anyway.
   const sweep = (): void => {
     const cutoff = new Date(now() - days * DAY_MS)
     void pruneOlderThan(cutoff).catch((e) => opts.onError?.(e))
