@@ -42,6 +42,8 @@ export interface BuiltDeps {
   /** The non-secret schedmgr `--db` descriptor (path or `pg:keychain:<service>`) baked into cron
    *  lines / Task actions + passed to the runners. Distinct from `dbPath` (the GUI's own file). */
   schedmgrDescriptor: string
+  /** Prune run_logs older than `cutoff` (wired to the active dialect's repo) — used by the retention sweep. */
+  pruneRunLogs: (cutoff: Date) => Promise<number>
 }
 
 /** Assemble everything the main process needs. Injectable so it runs under vitest without Electron. */
@@ -167,5 +169,7 @@ export async function buildMainDeps(app: App, opts: BuildOpts = {}): Promise<Bui
     runNowStreaming,
     cancelBatch: () => batch.cancel()
   }
-  return { deps, handle, emit, dbPath, schedmgrDescriptor }
+  const pruneRunLogs = (cutoff: Date): Promise<number> => repos.runLogs.pruneOlderThan(cutoff)
+
+  return { deps, handle, emit, dbPath, schedmgrDescriptor, pruneRunLogs }
 }

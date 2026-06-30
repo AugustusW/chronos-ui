@@ -1,8 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
-import { desc, eq } from 'drizzle-orm'
+import { desc, eq, lt } from 'drizzle-orm'
 import type { ChronosDb } from './client'
 import { runLogs, type RunLog } from './schema'
 import { keepLastBytes } from './output'
+
+/** Delete run_logs whose startedAt is strictly before `cutoff`; returns the number of rows removed.
+ *  Run history is otherwise insert-only and unbounded (~520k rows/year for a per-minute job), so a
+ *  retention sweep bounds the table on disk (review #4). The (jobId, startedAt, id) index also serves
+ *  this DELETE's startedAt range. */
+export function pruneRunsOlderThan(db: ChronosDb, cutoff: Date): number {
+  return db.delete(runLogs).where(lt(runLogs.startedAt, cutoff)).run().changes
+}
 
 export function startRun(
   db: ChronosDb,

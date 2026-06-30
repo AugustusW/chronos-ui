@@ -5,7 +5,7 @@ import { pathToFileURL } from 'node:url'
 import { installCrashGuards } from './crash-guards'
 import { buildMainDeps } from './bootstrap'
 import { registerIpcHandlers } from './ipc'
-import { startCheckpointTimer } from './db/lifecycle'
+import { startCheckpointTimer, startRetentionSweep } from './db/lifecycle'
 import { watchDbForChanges } from './db/watch'
 import type { DatabaseHandle } from './db/client'
 import { createTray, type TrayHandle } from './tray'
@@ -17,6 +17,7 @@ installCrashGuards({ process, app, showError: (title, content) => dialog.showErr
 
 let dbHandle: DatabaseHandle | null = null
 let stopCheckpoint: (() => void) | null = null
+let stopRetention: (() => void) | null = null
 let stopWatch: (() => void) | null = null
 let poll: ReturnType<typeof setInterval> | null = null
 let tray: TrayHandle | null = null        // module-scope so V8 doesn't GC the Tray (architect I4)
@@ -52,6 +53,10 @@ app.whenReady().then(async () => {
   dbHandle = built.handle
   dbHandle.checkpoint() // passive checkpoint on open (spec §7)
   stopCheckpoint = startCheckpointTimer(dbHandle)
+  // Bound the otherwise insert-only run history: prune on launch + daily while open (review #4).
+  stopRetention = startRetentionSweep(built.pruneRunLogs, {
+    onError: (e) => console.warn('chronos: run-log retention sweep failed:', e)
+  })
   registerIpcHandlers(built.deps)
   createWindow()
   const showWin = (): void => { const w = BrowserWindow.getAllWindows()[0]; if (w) { w.show(); w.focus() } else createWindow() }
@@ -73,6 +78,7 @@ app.whenReady().then(async () => {
 app.on('before-quit', () => {
   tray?.destroy(); tray = null
   stopCheckpoint?.()
+  stopRetention?.()
   stopWatch?.()
   if (poll) clearInterval(poll)
   dbHandle?.checkpoint()

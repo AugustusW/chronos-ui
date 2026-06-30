@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { desc, eq } from 'drizzle-orm'
+import { desc, eq, lt } from 'drizzle-orm'
 import type { PgDb } from './client'
 import { runLogs } from './schema.pg'
 import type { RunLog } from './schema'
@@ -73,6 +73,11 @@ export function createPgRunLogsRepo(db: PgDb) {
         .orderBy(desc(runLogs.startedAt), desc(runLogs.id))
         .limit(1)
       return row as RunLog | undefined
+    },
+    /** Delete run_logs older than `cutoff`; returns rows removed (retention sweep, review #4). */
+    async pruneOlderThan(cutoff: Date): Promise<number> {
+      const res = await db.delete(runLogs).where(lt(runLogs.startedAt, cutoff))
+      return res.rowCount ?? 0
     }
   }
 }
