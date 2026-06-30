@@ -94,6 +94,11 @@ func TestNotifyStoreRoundTrip(t *testing.T) {
 	if !ns.enabled || ns.chatID != "42" || ns.windowMin != 5 {
 		t.Fatalf("unexpected settings: %+v", ns)
 	}
+	// A row inserted without the includeStderr column must read back false (the migration's backfill
+	// default) — the security-critical "stderr off by default" contract for pre-migration rows.
+	if ns.includeStderr {
+		t.Fatal("includeStderr must default to false for a row created without the column")
+	}
 
 	jobID := insertTestJob(t, st, "backup", true /*notifyOnFailure*/)
 	name, notify, err := st.readJobNotify(jobID)

@@ -117,6 +117,8 @@ export function createNotifyService(deps: NotifyServiceDeps): NotifyService {
       }
 
       if (input.token !== undefined && input.token !== '') await storeToken(input.token)
+      // includeStderr is optional at the IPC/service boundary (an omitting caller); the repo layer
+      // requires an explicit bool, so ground a missing value to false (the secure default) here.
       const saved = await deps.repos.notifySettings.save({ enabled: input.enabled, chatId: input.chatId, windowMin: input.windowMin, includeStderr: input.includeStderr ?? false })
 
       const wantFlush = input.enabled && input.windowMin >= 1
