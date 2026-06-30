@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { pgTable, serial, integer, text, boolean, jsonb, timestamp } from 'drizzle-orm/pg-core'
+import { pgTable, serial, integer, text, boolean, jsonb, timestamp, index } from 'drizzle-orm/pg-core'
 
 const ts = (name: string) => timestamp(name, { mode: 'date', withTimezone: true })
 
@@ -43,7 +43,11 @@ export const runLogs = pgTable('run_logs', {
   createdAt: ts('createdAt')
     .notNull()
     .$defaultFn(() => new Date())
-})
+}, (t) => ({
+  // Mirrors schema.ts: composite index for listRunsForJob / getLatestRun
+  // (WHERE jobId=? ORDER BY startedAt DESC, id DESC) + the retention DELETE (review #4).
+  jobStartedIdx: index('run_logs_jobId_startedAt_id_idx').on(t.jobId, t.startedAt, t.id)
+}))
 
 export const notifySettings = pgTable('notify_settings', {
   id: integer('id').primaryKey(),
