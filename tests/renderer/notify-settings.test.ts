@@ -57,4 +57,14 @@ describe('SettingsView notifications', () => {
     await flushPromises()
     expect(w.find('[data-test="notify-token-storage-warn"]').exists()).toBe(false)
   })
+  it('forwards includeStderr and shows the stderr warning when enabled (code review #6)', async () => {
+    const w = mount(SettingsView)
+    await flushPromises()
+    expect(w.find('[data-test="notify-stderr-warn"]').exists()).toBe(false) // off by default
+    await w.find('[data-test="notify-include-stderr"]').setValue(true)
+    expect(w.find('[data-test="notify-stderr-warn"]').exists()).toBe(true)
+    await w.find('[data-test="notify-save"]').trigger('click')
+    await flushPromises()
+    expect(window.chronos.saveNotifySettings).toHaveBeenCalledWith(expect.objectContaining({ includeStderr: true }))
+  })
 })
