@@ -41,22 +41,27 @@ export function finishRun(
     stderr?: string
   }
 ): RunLog | undefined {
-  const existing = db.select().from(runLogs).where(eq(runLogs.id, id)).get()
-  if (!existing) return undefined
-  const endedAt = input.endedAt ?? new Date()
-  return db
-    .update(runLogs)
-    .set({
-      result: input.result,
-      endedAt,
-      durationMs: endedAt.getTime() - existing.startedAt.getTime(),
-      exitCode: input.exitCode,
-      stdout: input.stdout === undefined ? undefined : keepLastBytes(input.stdout),
-      stderr: input.stderr === undefined ? undefined : keepLastBytes(input.stderr)
-    })
-    .where(eq(runLogs.id, id))
-    .returning()
-    .get()
+  // Wrap the read-then-write in a transaction so durationMs is computed from the SAME startedAt the
+  // UPDATE commits against — another process (schedmgr) can't interleave a write between the two
+  // statements (review #11). better-sqlite3 transactions are synchronous.
+  return db.transaction((tx) => {
+    const existing = tx.select().from(runLogs).where(eq(runLogs.id, id)).get()
+    if (!existing) return undefined
+    const endedAt = input.endedAt ?? new Date()
+    return tx
+      .update(runLogs)
+      .set({
+        result: input.result,
+        endedAt,
+        durationMs: endedAt.getTime() - existing.startedAt.getTime(),
+        exitCode: input.exitCode,
+        stdout: input.stdout === undefined ? undefined : keepLastBytes(input.stdout),
+        stderr: input.stderr === undefined ? undefined : keepLastBytes(input.stderr)
+      })
+      .where(eq(runLogs.id, id))
+      .returning()
+      .get()
+  })
 }
 
 export function listRecentRuns(db: ChronosDb, limit = 50): RunLog[] {
