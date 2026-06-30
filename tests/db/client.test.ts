@@ -20,6 +20,15 @@ describe('pgPoolOptions (TLS — review #11)', () => {
   it('defers to an explicit sslmode in the DSN (does not override)', () => {
     expect(pgPoolOptions('postgres://db.example.com/app?sslmode=require').ssl).toBeUndefined()
   })
+  it('handles libpq key=value DSNs (remote → TLS, local → plaintext, sslmode → defer)', () => {
+    expect(pgPoolOptions('host=db.example.com dbname=app user=u').ssl).toEqual({ rejectUnauthorized: true })
+    expect(pgPoolOptions('host=localhost dbname=app').ssl).toBeUndefined()
+    expect(pgPoolOptions('host=db.example.com dbname=app sslmode=require').ssl).toBeUndefined()
+  })
+  it('treats a hostless DSN (local socket) and an unbracketed IPv6 loopback as local', () => {
+    expect(pgPoolOptions('dbname=app').ssl).toBeUndefined()
+    expect(pgPoolOptions('postgres://u@::1/app').ssl).toBeUndefined()
+  })
 })
 
 let dir: string | undefined

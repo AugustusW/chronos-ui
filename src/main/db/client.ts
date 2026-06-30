@@ -47,9 +47,17 @@ export function pgPoolOptions(dsn: string): { connectionString: string; ssl?: { 
   try {
     host = new URL(dsn).hostname
   } catch {
-    /* non-URL DSN (e.g. key=value form) → treat as local / no override */
+    /* not URL form (e.g. an unbracketed-IPv6 authority) → fall through to the key=value parse below */
   }
-  const hasSslmode = /[?&]sslmode=/i.test(dsn)
+  // A libpq key=value DSN ("host=db.example.com dbname=app") doesn't URL-parse — pull host= out so a
+  // remote key=value DSN still gets TLS (review #11 follow-up).
+  if (host === '') {
+    const m = dsn.match(/\bhost\s*=\s*(\S+)/i)
+    if (m) host = m[1]
+  }
+  // sslmode in either URL-query (?sslmode=) or key=value (sslmode=) form → defer to the driver.
+  const hasSslmode = /\bsslmode\s*=/i.test(dsn)
+  // host === '' here means no host at all → a local Unix socket; treat as local.
   const isLocal = host === '' || host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]'
   if (hasSslmode || isLocal) return { connectionString: dsn }
   return { connectionString: dsn, ssl: { rejectUnauthorized: true } }
