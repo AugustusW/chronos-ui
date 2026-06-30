@@ -10,6 +10,8 @@ const defaultNextId = (): number => ++_seq
 export interface ChildLike {
   on(event: 'exit', cb: (code: number | null) => void): unknown
   on(event: 'error', cb: (err: Error) => void): unknown
+  /** Best-effort kill if the UI cap fires, so schedmgr isn't left running as an orphan (review #9). */
+  kill?(signal?: NodeJS.Signals | number): void
 }
 export type SpawnLike = (cmd: string, args: string[]) => ChildLike
 
@@ -58,7 +60,10 @@ export async function runNow(id: number, deps: RunNowDeps): Promise<RunNowResult
     throw new Error(`failed to spawn schedmgr at ${deps.schedmgrPath}: ${outcome.err.message}`)
   }
   if (outcome.t === 'timeout') {
-    return { status: 'ui_timeout', jobId: id, waitedMs: cap } // schedmgr left as a detached orphan; it records best-effort
+    // The UI cap fired before schedmgr exited — kill it so it isn't left running as an orphan past
+    // the cap (review #9). It still records its own result best-effort if it was mid-run.
+    child.kill?.()
+    return { status: 'ui_timeout', jobId: id, waitedMs: cap }
   }
   const run = await deps.runLogs.getLatest(id)
   if (!run) return { status: 'ui_timeout', jobId: id, waitedMs: cap } // schedmgr exited without a row (best-effort DB failure)
@@ -81,6 +86,9 @@ export interface RunStreamingDeps {
   /** Injectable id source for live-event keying. Defaults to a module-level monotonic counter.
    *  The returned value is a synthetic id (NOT a DB run_logs id). */
   nextId?: () => number
+  graceMs?: number // added to the job timeout for the UI safety-net wait (mirrors runNow)
+  hardFloorMs?: number // minimum UI wait
+  delay?: (ms: number, cb: () => void) => void // injectable timer (tests pass a synchronous stub)
 }
 
 /**
@@ -104,8 +112,16 @@ export async function runNowStreaming(id: number, deps: RunStreamingDeps): Promi
   const child = deps.spawn(deps.schedmgrPath, args)
   child.stdout?.on('data', (b) => deps.emit({ kind: 'output', runId: syntheticRunId, stream: 'stdout', chunk: b.toString() }))
   child.stderr?.on('data', (b) => deps.emit({ kind: 'output', runId: syntheticRunId, stream: 'stderr', chunk: b.toString() }))
-  // Guard against double-emit if both 'exit' and 'error' fire (shouldn't happen in practice, but
-  // Node's EventEmitter doesn't strictly prevent it).
+  // UI safety net (mirrors runNow): if neither exit nor error fires within the cap (a hung schedmgr),
+  // kill it and finish — otherwise this Promise and the live run would hang forever (review #9).
+  const grace = deps.graceMs ?? 30_000
+  const floor = deps.hardFloorMs ?? 60_000
+  const cap = Math.max((job.timeoutSec ?? 0) * 1000 + grace, floor)
+  // unref the safety-net timer so a run that exits normally doesn't leave it holding the event loop
+  // open (it fires once and no-ops after settled).
+  const delay = deps.delay ?? ((ms, cb) => { setTimeout(cb, ms).unref?.() })
+  // Guard against double-emit if more than one of exit / error / timeout fires (Node's EventEmitter
+  // doesn't strictly prevent it, and the timeout races the others).
   let settled = false
   await new Promise<void>((resolve, reject) => {
     child.on('exit', (code) => {
@@ -120,6 +136,13 @@ export async function runNowStreaming(id: number, deps: RunStreamingDeps): Promi
       settled = true
       deps.emit({ kind: 'finished', runId: syntheticRunId, result: 'failure', exitCode: null, endedAt: now() })
       reject(new Error(`failed to spawn schedmgr: ${err.message}`))
+    })
+    delay(cap, () => {
+      if (settled) return
+      settled = true
+      child.kill?.()
+      deps.emit({ kind: 'finished', runId: syntheticRunId, result: 'failure', exitCode: null, endedAt: now() })
+      resolve()
     })
   })
 }

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { EventEmitter } from 'node:events'
 import { makeTestDb } from '../db/helpers'
 import { createRepositories } from '../../src/main/db/repositories'
@@ -52,6 +52,19 @@ describe('runNow', () => {
     const res = await runNow(job.id, { jobs: repos.jobs, runLogs: repos.runLogs, schedmgrPath: '/s', dbPath: '/db', spawn, delay: (_ms, cb) => cb() })
     expect(res.status).toBe('ui_timeout')
     if (res.status === 'ui_timeout') expect(res.jobId).toBe(job.id)
+    await h.close()
+  })
+
+  it('kills the schedmgr child when the UI cap fires, so it is not left an orphan (review #9)', async () => {
+    const h = makeTestDb()
+    const repos = createRepositories(h)
+    const job = seed(h.db)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const child: any = new EventEmitter() // never emits exit/error → only the cap fires
+    child.kill = vi.fn()
+    const res = await runNow(job.id, { jobs: repos.jobs, runLogs: repos.runLogs, schedmgrPath: '/s', dbPath: '/db', spawn: () => child, delay: (_ms, cb) => cb() })
+    expect(res.status).toBe('ui_timeout')
+    expect(child.kill).toHaveBeenCalled()
     await h.close()
   })
 
@@ -148,6 +161,23 @@ describe('runNowStreaming', () => {
     const finished = events.filter((e) => e.kind === 'finished')
     expect(finished).toHaveLength(1)
     expect(finished[0]).toMatchObject({ kind: 'finished', result: 'failure', exitCode: null })
+    await h.close()
+  })
+
+  it('kills the child and emits finished:failure when the UI cap fires (no hang / orphan — review #9)', async () => {
+    const h = makeTestDb()
+    const repos = createRepositories(h)
+    const job = seed(h.db, { timeoutSec: 0 })
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const events: any[] = []
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const child: any = new EventEmitter()
+    child.stdout = new EventEmitter(); child.stderr = new EventEmitter()
+    child.kill = vi.fn()
+    // spawn never emits exit/error → only the injected cap fires
+    await runNowStreaming(job.id, { jobs: repos.jobs, schedmgrPath: '/s', dbPath: '/db', spawn: () => child, emit: (e) => events.push(e), delay: (_ms, cb) => cb() })
+    expect(child.kill).toHaveBeenCalled()
+    expect(events.at(-1)).toMatchObject({ kind: 'finished', result: 'failure', exitCode: null })
     await h.close()
   })
 })
