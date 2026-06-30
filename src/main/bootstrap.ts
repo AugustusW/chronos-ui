@@ -117,8 +117,9 @@ export async function buildMainDeps(app: App, opts: BuildOpts = {}): Promise<Bui
     secretDir: goSecretDir(platform, process.env, homedir()),
     fetchFn: fetch,
     platform,
-    // Runs a keychain CLI (security / secret-tool) capturing stdout + exit code; the token is fed on
-    // stdin for secret-tool so it never appears in argv / the process list.
+    // Runs a keychain CLI (security / secret-tool) capturing stdout + exit code. The token is fed on
+    // stdin for secret-tool (Linux), so on Linux it never appears in argv; on macOS `security` takes
+    // it as an argument (brief `ps` exposure — see notify-keychain.ts writeCommand).
     execKeychain: (cmd, a, stdin) => new Promise((resolve) => {
       try {
         const child = spawn(cmd, a, { stdio: ['pipe', 'pipe', 'ignore'] })

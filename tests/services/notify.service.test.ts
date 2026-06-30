@@ -34,9 +34,9 @@ const baseDeps = (over: Partial<NotifyServiceDeps> = {}): NotifyServiceDeps => (
 })
 
 describe('notify service', () => {
-  it('getSettings reports tokenSet=false initially', async () => {
+  it('getSettings reports tokenSet=false / tokenStorage=null initially', async () => {
     const svc = createNotifyService(baseDeps())
-    expect(await svc.getSettings()).toMatchObject({ enabled: false, tokenSet: false })
+    expect(await svc.getSettings()).toMatchObject({ enabled: false, tokenSet: false, tokenStorage: null })
   })
 
   it('saveSettings writes the token file and reports tokenSet=true', async () => {
@@ -237,6 +237,20 @@ describe('notify service — keychain storage (code review #1 / W2)', () => {
     expect(existsSync(join(deps.secretDir, 'chronos-ui-notify-token.secret'))).toBe(true)
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('UNENCRYPTED'))
     expect((await svc.getSettings()).tokenStorage).toBe('file')
+  })
+
+  it('clears any stale keychain item when the keychain write fails, so it cannot shadow the file token (review #2)', async () => {
+    const calls: string[][] = []
+    const exec = vi.fn(async (cmd: string, args: string[]) => {
+      calls.push([cmd, ...args])
+      // add fails (keychain write down); delete + any read succeed-but-empty
+      return args[0] === 'add-generic-password' ? { code: 1, stdout: 'denied' } : { code: 0, stdout: '' }
+    })
+    const deps = baseDeps({ platform: 'darwin', execKeychain: exec, logWarn: () => {} })
+    await createNotifyService(deps).saveSettings({ enabled: true, chatId: '42', windowMin: 0, token: '123456789:ABCdef_-' })
+    // delete-generic-password was issued (clearing the stale item) before the file fallback
+    expect(calls.some((c) => c[1] === 'delete-generic-password')).toBe(true)
+    expect(existsSync(join(deps.secretDir, 'chronos-ui-notify-token.secret'))).toBe(true)
   })
 
   it('on Windows, warns and stores in the 0600 file (keychain unsupported)', async () => {
