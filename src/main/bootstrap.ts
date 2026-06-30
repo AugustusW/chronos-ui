@@ -116,6 +116,20 @@ export async function buildMainDeps(app: App, opts: BuildOpts = {}): Promise<Bui
     repos, flushScheduler, schedmgrPath, schedmgrDescriptor,
     secretDir: goSecretDir(platform, process.env, homedir()),
     fetchFn: fetch,
+    platform,
+    // Runs a keychain CLI (security / secret-tool) capturing stdout + exit code; the token is fed on
+    // stdin for secret-tool so it never appears in argv / the process list.
+    execKeychain: (cmd, a, stdin) => new Promise((resolve) => {
+      try {
+        const child = spawn(cmd, a, { stdio: ['pipe', 'pipe', 'ignore'] })
+        let out = ''
+        child.stdout?.on('data', (d) => { out += d.toString() })
+        child.on('close', (code) => resolve({ code: code ?? 1, stdout: out }))
+        child.on('error', () => resolve({ code: 1, stdout: '' }))
+        if (stdin !== undefined) child.stdin?.write(stdin)
+        child.stdin?.end()
+      } catch { resolve({ code: 1, stdout: '' }) }
+    }),
     spawnFlush: (p, a) => new Promise<void>((resolve) => {
       const TIMEOUT_MS = 15_000
       let settled = false

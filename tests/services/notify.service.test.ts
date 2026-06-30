@@ -25,6 +25,11 @@ const baseDeps = (over: Partial<NotifyServiceDeps> = {}): NotifyServiceDeps => (
   secretDir: mkdtempSync(join(tmpdir(), 'chronos-notify-')),
   fetchFn: vi.fn(async () => ({ ok: true, status: 200, text: async () => '{"ok":true}' })) as unknown as typeof fetch,
   spawnFlush: vi.fn(async () => {}),
+  // Default to win32 so the base fixtures exercise the 0600-file fallback path (keychain unsupported);
+  // the keychain-specific suite below overrides platform: 'darwin' with a mock execKeychain.
+  platform: 'win32',
+  execKeychain: vi.fn(async () => ({ code: 1, stdout: '' })),
+  logWarn: () => {},
   ...over
 })
 
@@ -117,7 +122,10 @@ describe('notify service', () => {
       schedmgrDescriptor: '/db/chronos.db',
       secretDir: mkdtempSync(join(tmpdir(), 'chronos-notify-order-')),
       fetchFn: vi.fn(async () => ({ ok: true, status: 200, text: async () => '{}' })) as unknown as typeof fetch,
-      spawnFlush
+      spawnFlush,
+      platform: 'win32',
+      execKeychain: vi.fn(async () => ({ code: 1, stdout: '' })),
+      logWarn: () => {}
     }
 
     const svc = createNotifyService(deps)
@@ -150,7 +158,10 @@ describe('notify service', () => {
       schedmgrDescriptor: '/db/chronos.db',
       secretDir: mkdtempSync(join(tmpdir(), 'chronos-notify-nobatch-')),
       fetchFn: vi.fn(async () => ({ ok: true, status: 200, text: async () => '{}' })) as unknown as typeof fetch,
-      spawnFlush
+      spawnFlush,
+      platform: 'win32',
+      execKeychain: vi.fn(async () => ({ code: 1, stdout: '' })),
+      logWarn: () => {}
     }
 
     const svc = createNotifyService(deps)
@@ -178,7 +189,10 @@ describe('notify service', () => {
       schedmgrDescriptor: '/db/chronos.db',
       secretDir: mkdtempSync(join(tmpdir(), 'chronos-notify-fail-')),
       fetchFn: vi.fn(async () => ({ ok: true, status: 200, text: async () => '{}' })) as unknown as typeof fetch,
-      spawnFlush
+      spawnFlush,
+      platform: 'win32',
+      execKeychain: vi.fn(async () => ({ code: 1, stdout: '' })),
+      logWarn: () => {}
     }
 
     const svc = createNotifyService(deps)
@@ -190,5 +204,64 @@ describe('notify service', () => {
     expect(result.flushWarning).toContain('schedmgr timed out')
     // Save still completed (new state is disabled)
     expect(saved.enabled).toBe(false)
+  })
+})
+
+describe('notify service — keychain storage (code review #1 / W2)', () => {
+  it('on macOS, saveSettings stores the token in the keychain and writes NO plaintext file', async () => {
+    const exec = vi.fn(async () => ({ code: 0, stdout: '' })) // keychain store succeeds
+    const deps = baseDeps({ platform: 'darwin', execKeychain: exec })
+    const svc = createNotifyService(deps)
+    await svc.saveSettings({ enabled: true, chatId: '42', windowMin: 0, token: '123456789:ABCdef_-' })
+    // keychain write was issued via `security add-generic-password`
+    expect(exec).toHaveBeenCalledWith('security', expect.arrayContaining(['add-generic-password']), undefined)
+    // and the plaintext fallback file was NOT created
+    expect(existsSync(join(deps.secretDir, 'chronos-ui-notify-token.secret'))).toBe(false)
+  })
+
+  it('reports tokenStorage="keychain" when the keychain holds the token', async () => {
+    const exec = vi.fn(async (_c: string, args: string[]) =>
+      args[0] === 'find-generic-password' ? { code: 0, stdout: '123456789:ABCdef_-\n' } : { code: 0, stdout: '' }
+    )
+    const dto = await createNotifyService(baseDeps({ platform: 'darwin', execKeychain: exec })).getSettings()
+    expect(dto.tokenSet).toBe(true)
+    expect(dto.tokenStorage).toBe('keychain')
+  })
+
+  it('falls back to the 0600 file and warns when the keychain write fails', async () => {
+    const exec = vi.fn(async () => ({ code: 1, stdout: 'denied' })) // store fails, read finds nothing
+    const warn = vi.fn()
+    const deps = baseDeps({ platform: 'darwin', execKeychain: exec, logWarn: warn })
+    const svc = createNotifyService(deps)
+    await svc.saveSettings({ enabled: true, chatId: '42', windowMin: 0, token: '123456789:ABCdef_-' })
+    expect(existsSync(join(deps.secretDir, 'chronos-ui-notify-token.secret'))).toBe(true)
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('UNENCRYPTED'))
+    expect((await svc.getSettings()).tokenStorage).toBe('file')
+  })
+
+  it('on Windows, warns and stores in the 0600 file (keychain unsupported)', async () => {
+    const warn = vi.fn()
+    const deps = baseDeps({ platform: 'win32', logWarn: warn })
+    const svc = createNotifyService(deps)
+    await svc.saveSettings({ enabled: true, chatId: '42', windowMin: 0, token: '123456789:ABCdef_-' })
+    expect(deps.execKeychain).not.toHaveBeenCalled() // never even tries the keychain
+    expect(existsSync(join(deps.secretDir, 'chronos-ui-notify-token.secret'))).toBe(true)
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('UNENCRYPTED'))
+    expect((await svc.getSettings()).tokenStorage).toBe('file')
+  })
+
+  it('testSend reads the token from the keychain (not the file) on macOS', async () => {
+    const exec = vi.fn(async (_c: string, args: string[]) =>
+      args[0] === 'find-generic-password' ? { code: 0, stdout: '123456789:ABCdef_-\n' } : { code: 0, stdout: '' }
+    )
+    const fetchFn = vi.fn(async () => ({ ok: true, status: 200, text: async () => '{}' })) as unknown as typeof fetch
+    const repos = (() => {
+      const saved = { enabled: true, chatId: '42', windowMin: 0, updatedAt: new Date() }
+      return { notifySettings: { get: async () => saved, save: async () => saved } } as unknown as Repositories
+    })()
+    const svc = createNotifyService(baseDeps({ platform: 'darwin', execKeychain: exec, fetchFn, repos }))
+    const r = await svc.testSend()
+    expect(r.ok).toBe(true)
+    expect(fetchFn).toHaveBeenCalledWith(expect.stringContaining('/bot123456789:ABCdef_-/sendMessage'), expect.anything())
   })
 })
