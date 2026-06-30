@@ -1,14 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 import { join } from 'node:path'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, rmSync } from 'node:fs'
 import type { Repositories } from '../db/repositories'
 import type { FlushScheduler } from './notify-flush-launchd'
 import { NOTIFY_TOKEN_FILE, writeNotifyToken } from './notify-secret'
 import { isNotifyTokenFormat, isChatIdFormat } from '../../shared/notify-validation'
+import { NOTIFY_TOKEN_SERVICE, keychainWriteSupported, keychainStore, keychainRead, type ExecFn } from './notify-keychain'
 
-export type NotifySettingsDTO = { enabled: boolean; chatId: string | null; windowMin: number; tokenSet: boolean }
+/** Where the bot token currently lives. 'keychain' = encrypted at rest in the OS keychain (macOS /
+ *  Linux); 'file' = a 0600 plaintext file (Windows, or a keychain-write failure) — surfaced so the UI
+ *  can warn the user it is unencrypted. */
+export type TokenStorage = 'keychain' | 'file'
+export type NotifySettingsDTO = { enabled: boolean; chatId: string | null; windowMin: number; tokenSet: boolean; tokenStorage: TokenStorage | null }
 export type NotifySaveInput = { enabled: boolean; chatId: string | null; windowMin: number; token?: string }
 export type SaveResult = { ok: boolean; settings?: NotifySettingsDTO; flushWarning?: string }
+
+const KEYCHAIN_ACCOUNT = 'chronos-ui'
 
 export interface NotifyServiceDeps {
   repos: Repositories
@@ -20,6 +27,12 @@ export interface NotifyServiceDeps {
   secretDir: string
   fetchFn: typeof fetch
   spawnFlush: (path: string, args: string[]) => Promise<void>
+  /** Host platform — selects keychain write support (mirrors the Go reader). */
+  platform: NodeJS.Platform
+  /** Runs a keychain CLI (security / secret-tool); injected so tests never touch the real keychain. */
+  execKeychain: ExecFn
+  /** Where the "token stored unencrypted" warning goes (defaults to stderr). */
+  logWarn?: (msg: string) => void
 }
 
 export interface NotifyService {
@@ -32,12 +45,45 @@ const TELEGRAM_BASE = 'https://api.telegram.org'
 
 export function createNotifyService(deps: NotifyServiceDeps): NotifyService {
   const tokenPath = join(deps.secretDir, NOTIFY_TOKEN_FILE)
-  const tokenSet = (): boolean => existsSync(tokenPath)
-  const readToken = (): string | null => {
+  const warn = deps.logWarn ?? ((m: string): void => { process.stderr.write(`chronos-ui: ${m}\n`) })
+  const fileToken = (): string | null => {
     try { const t = readFileSync(tokenPath, 'utf8').trim(); return t || null } catch { return null }
   }
-  const toDTO = (s: { enabled: boolean; chatId: string | null; windowMin: number }): NotifySettingsDTO =>
-    ({ enabled: s.enabled, chatId: s.chatId, windowMin: s.windowMin, tokenSet: tokenSet() })
+
+  // Token persistence is keychain-first (mirroring the Go reader in schedmgr/secret.go), with the
+  // 0600 file as the fallback on Windows / a keychain-write failure.
+  const storeToken = async (token: string): Promise<void> => {
+    if (keychainWriteSupported(deps.platform)) {
+      const stored = await keychainStore(deps.execKeychain, deps.platform, NOTIFY_TOKEN_SERVICE, KEYCHAIN_ACCOUNT, token)
+      if (stored) {
+        // Migrate away from any earlier plaintext file so the token no longer lives on disk in clear.
+        try { rmSync(tokenPath) } catch { /* no prior file */ }
+        return
+      }
+      warn(`keychain store failed; storing the Telegram bot token UNENCRYPTED at ${tokenPath}`)
+    } else {
+      warn(`keychain write unsupported on ${deps.platform}; storing the Telegram bot token UNENCRYPTED at ${tokenPath}`)
+    }
+    writeNotifyToken(deps.secretDir, token)
+  }
+  const readToken = async (): Promise<string | null> => {
+    if (keychainWriteSupported(deps.platform)) {
+      const kc = await keychainRead(deps.execKeychain, deps.platform, NOTIFY_TOKEN_SERVICE)
+      if (kc) return kc
+    }
+    return fileToken()
+  }
+  const tokenStorage = async (): Promise<TokenStorage | null> => {
+    if (keychainWriteSupported(deps.platform)) {
+      const kc = await keychainRead(deps.execKeychain, deps.platform, NOTIFY_TOKEN_SERVICE)
+      if (kc) return 'keychain'
+    }
+    return existsSync(tokenPath) ? 'file' : null
+  }
+  const toDTO = async (s: { enabled: boolean; chatId: string | null; windowMin: number }): Promise<NotifySettingsDTO> => {
+    const storage = await tokenStorage()
+    return { enabled: s.enabled, chatId: s.chatId, windowMin: s.windowMin, tokenSet: storage !== null, tokenStorage: storage }
+  }
 
   return {
     async getSettings() {
@@ -66,7 +112,7 @@ export function createNotifyService(deps: NotifyServiceDeps): NotifyService {
         }
       }
 
-      if (input.token !== undefined && input.token !== '') writeNotifyToken(deps.secretDir, input.token)
+      if (input.token !== undefined && input.token !== '') await storeToken(input.token)
       const saved = await deps.repos.notifySettings.save({ enabled: input.enabled, chatId: input.chatId, windowMin: input.windowMin })
 
       const wantFlush = input.enabled && input.windowMin >= 1
@@ -80,11 +126,11 @@ export function createNotifyService(deps: NotifyServiceDeps): NotifyService {
         const msg = (e as Error).message
         flushWarning = flushWarning ? `${flushWarning}; ${msg}` : msg
       }
-      return { ok: true, settings: toDTO(saved), flushWarning }
+      return { ok: true, settings: await toDTO(saved), flushWarning }
     },
 
     async testSend() {
-      const token = readToken()
+      const token = await readToken()
       if (!token) return { ok: false, error: 'No bot token saved' }
       // The token is read from disk and interpolated into the API URL path below — re-validate its
       // format here so a tampered .secret file can't reshape the request, keeping the same
