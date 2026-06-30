@@ -80,3 +80,33 @@ func TestNotifyBestEffortOnTokenError(t *testing.T) {
 		t.Fatalf("token error must skip send")
 	}
 }
+
+// code review #6: stderr in immediate alerts is opt-in (default off).
+func TestNotifyImmediateExcludesStderrByDefault(t *testing.T) {
+	st := newTestSqliteStore(t)
+	// includeStderr omitted → defaults to false
+	mustExec(t, st, `INSERT INTO notify_settings (id,enabled,chatId,windowMin,updatedAt) VALUES (1,1,'42',0,0)`)
+	jobID := insertTestJob(t, st, "backup", true)
+	var sent []string
+	notifyAfterRun(depsWith(st, &sent, nil), jobID, "failure", 1, time.UnixMilli(1000), "secret-leak-xyz")
+	if len(sent) != 1 {
+		t.Fatalf("want 1 send, got %d", len(sent))
+	}
+	if strings.Contains(sent[0], "secret-leak-xyz") {
+		t.Fatalf("stderr must be EXCLUDED by default, got %q", sent[0])
+	}
+}
+
+func TestNotifyImmediateIncludesStderrWhenOptedIn(t *testing.T) {
+	st := newTestSqliteStore(t)
+	mustExec(t, st, `INSERT INTO notify_settings (id,enabled,chatId,windowMin,includeStderr,updatedAt) VALUES (1,1,'42',0,1,0)`)
+	jobID := insertTestJob(t, st, "backup", true)
+	var sent []string
+	notifyAfterRun(depsWith(st, &sent, nil), jobID, "failure", 1, time.UnixMilli(1000), "diagnostic-tail-abc")
+	if len(sent) != 1 {
+		t.Fatalf("want 1 send, got %d", len(sent))
+	}
+	if !strings.Contains(sent[0], "diagnostic-tail-abc") {
+		t.Fatalf("stderr must be INCLUDED when opted in, got %q", sent[0])
+	}
+}

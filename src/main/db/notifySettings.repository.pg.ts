@@ -4,7 +4,7 @@ import type { PgDb } from './client'
 import { notifySettings } from './schema.pg'
 import type { NotifySettingsView, NotifySettingsInput, NotifySettingsRepo } from './notifySettings.repository'
 
-const DEFAULT: NotifySettingsView = { enabled: false, chatId: null, windowMin: 0, updatedAt: null }
+const DEFAULT: NotifySettingsView = { enabled: false, chatId: null, windowMin: 0, includeStderr: false, updatedAt: null }
 
 /** Postgres implementation of the notifySettings repository (mirror of the sqlite notifySettings.repository.ts). */
 export function createPgNotifySettingsRepo(db: PgDb): NotifySettingsRepo {
@@ -12,14 +12,14 @@ export function createPgNotifySettingsRepo(db: PgDb): NotifySettingsRepo {
     async get(): Promise<NotifySettingsView> {
       const [row] = await db.select().from(notifySettings).where(eq(notifySettings.id, 1))
       if (!row) return { ...DEFAULT }
-      return { enabled: row.enabled, chatId: row.chatId, windowMin: row.windowMin, updatedAt: row.updatedAt }
+      return { enabled: row.enabled, chatId: row.chatId, windowMin: row.windowMin, includeStderr: row.includeStderr, updatedAt: row.updatedAt }
     },
     async save(input: NotifySettingsInput): Promise<NotifySettingsView> {
       await db.insert(notifySettings)
-        .values({ id: 1, enabled: input.enabled, chatId: input.chatId, windowMin: input.windowMin, updatedAt: new Date() })
+        .values({ id: 1, enabled: input.enabled, chatId: input.chatId, windowMin: input.windowMin, includeStderr: input.includeStderr, updatedAt: new Date() })
         .onConflictDoUpdate({
           target: notifySettings.id,
-          set: { enabled: input.enabled, chatId: input.chatId, windowMin: input.windowMin, updatedAt: new Date() }
+          set: { enabled: input.enabled, chatId: input.chatId, windowMin: input.windowMin, includeStderr: input.includeStderr, updatedAt: new Date() }
         })
       return this.get()
     }

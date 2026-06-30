@@ -8,7 +8,7 @@ import type { NotifySettingsInput } from '../../src/main/db/notifySettings.repos
 import type { FlushScheduler } from '../../src/main/services/notify-flush-launchd'
 
 function fakeRepos() {
-  let saved = { enabled: false, chatId: null as string | null, windowMin: 0, updatedAt: null as Date | null }
+  let saved = { enabled: false, chatId: null as string | null, windowMin: 0, includeStderr: false, updatedAt: null as Date | null }
   return {
     notifySettings: {
       get: async () => saved,
@@ -34,9 +34,22 @@ const baseDeps = (over: Partial<NotifyServiceDeps> = {}): NotifyServiceDeps => (
 })
 
 describe('notify service', () => {
-  it('getSettings reports tokenSet=false / tokenStorage=null initially', async () => {
+  it('getSettings reports tokenSet=false / tokenStorage=null / includeStderr=false initially', async () => {
     const svc = createNotifyService(baseDeps())
-    expect(await svc.getSettings()).toMatchObject({ enabled: false, tokenSet: false, tokenStorage: null })
+    expect(await svc.getSettings()).toMatchObject({ enabled: false, tokenSet: false, tokenStorage: null, includeStderr: false })
+  })
+
+  it('persists includeStderr and surfaces it in the DTO (code review #6)', async () => {
+    const svc = createNotifyService(baseDeps())
+    const r = await svc.saveSettings({ enabled: true, chatId: '42', windowMin: 0, includeStderr: true })
+    expect(r.settings?.includeStderr).toBe(true)
+    expect((await svc.getSettings()).includeStderr).toBe(true)
+  })
+
+  it('defaults includeStderr to false when the field is omitted', async () => {
+    const svc = createNotifyService(baseDeps())
+    await svc.saveSettings({ enabled: true, chatId: '42', windowMin: 0 })
+    expect((await svc.getSettings()).includeStderr).toBe(false)
   })
 
   it('saveSettings writes the token file and reports tokenSet=true', async () => {
