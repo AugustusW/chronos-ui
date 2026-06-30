@@ -18,6 +18,8 @@ onMounted(() => n.load())
       <div v-if="n.tokenStorage === 'file'" class="row warn" data-test="notify-token-storage-warn">⚠️ This token is stored unencrypted on disk (your OS keychain is unavailable on this platform). Anyone with access to your user account can read it.</div>
       <label class="row">Chat id <input v-model="n.chatId" data-test="notify-chat" type="text" placeholder="e.g. 123456789" /></label>
       <label class="row">Batch window (min) <input v-model.number="n.windowMin" data-test="notify-window" type="number" min="0" /> <span class="muted">(0 = immediate)</span></label>
+      <label class="row"><input v-model="n.includeStderr" data-test="notify-include-stderr" type="checkbox" /> Include the failed job's error output (stderr) in immediate alerts</label>
+      <div v-if="n.includeStderr" class="row warn" data-test="notify-stderr-warn">⚠️ stderr can contain secrets, tokens or file paths — these will be sent to your Telegram chat. Only enable for chats you control.</div>
       <div class="row">
         <button data-test="notify-save" :disabled="n.saving" @click="n.save()">Save</button>
         <button data-test="notify-test" :disabled="n.testing" @click="n.test()">Send test message</button>
