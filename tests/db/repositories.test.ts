@@ -34,7 +34,9 @@ if (process.env.TEST_PG_URL) {
       // Full reset so every test re-migrates from scratch. node-postgres's migrator keeps its
       // journal in the `drizzle` schema (drizzle.__drizzle_migrations) — dropping only the tables
       // would leave the journal, making migratePg skip table creation on the 2nd+ test.
-      await h.pool!.query('DROP SCHEMA IF EXISTS drizzle CASCADE; DROP TABLE IF EXISTS run_logs, jobs CASCADE')
+      // ALL tables must be dropped (not just jobs/run_logs): a persisting notify_settings would make
+      // a re-applied ADD COLUMN migration (e.g. 0002 includeStderr) fail "column already exists".
+      await h.pool!.query('DROP SCHEMA IF EXISTS drizzle CASCADE; DROP TABLE IF EXISTS run_logs, notify_outbox, notify_settings, jobs CASCADE')
       await migratePg(h.db as never, { migrationsFolder: PG_MIGRATIONS })
       return h
     }
