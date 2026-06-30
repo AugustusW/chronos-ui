@@ -5,7 +5,7 @@ import type { Repositories } from '../db/repositories'
 import type { FlushScheduler } from './notify-flush-launchd'
 import { NOTIFY_TOKEN_FILE, writeNotifyToken } from './notify-secret'
 import { isNotifyTokenFormat, isChatIdFormat } from '../../shared/notify-validation'
-import { NOTIFY_TOKEN_SERVICE, keychainWriteSupported, keychainStore, keychainRead, type ExecFn } from './notify-keychain'
+import { NOTIFY_TOKEN_SERVICE, keychainWriteSupported, keychainStore, keychainRead, keychainDelete, type ExecFn } from './notify-keychain'
 
 /** Where the bot token currently lives. 'keychain' = encrypted at rest in the OS keychain (macOS /
  *  Linux); 'file' = a 0600 plaintext file (Windows, or a keychain-write failure) — surfaced so the UI
@@ -60,6 +60,10 @@ export function createNotifyService(deps: NotifyServiceDeps): NotifyService {
         try { rmSync(tokenPath) } catch { /* no prior file */ }
         return
       }
+      // Keychain write failed → fall back to the file. First clear any PRIOR keychain item, otherwise a
+      // stale token from an earlier successful write would shadow the new file token — both readToken()
+      // here and the Go schedmgr read keychain-first, so they'd serve the old token (code review #2).
+      await keychainDelete(deps.execKeychain, deps.platform, NOTIFY_TOKEN_SERVICE)
       warn(`keychain store failed; storing the Telegram bot token UNENCRYPTED at ${tokenPath}`)
     } else {
       warn(`keychain write unsupported on ${deps.platform}; storing the Telegram bot token UNENCRYPTED at ${tokenPath}`)

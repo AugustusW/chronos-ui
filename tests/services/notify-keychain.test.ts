@@ -17,6 +17,8 @@ describe('keychain command builders', () => {
   })
 
   it('darwin uses security add/find/delete (default ACL — no -A)', () => {
+    // No `stdin`: /usr/bin/security has no stdin-password option, so the token is a CLI arg (-w) on
+    // macOS (briefly visible in `ps`). Linux below uses stdin instead. toEqual asserts stdin is absent.
     expect(writeCommand('darwin', NOTIFY_TOKEN_SERVICE, 'chronos-ui', '123:ABC')).toEqual({
       cmd: 'security',
       args: ['add-generic-password', '-U', '-s', 'chronos-ui-notify-token', '-a', 'chronos-ui', '-w', '123:ABC']

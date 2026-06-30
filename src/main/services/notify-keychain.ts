@@ -45,6 +45,10 @@ export function writeCommand(
   if (platform === 'darwin') {
     // -U updates an existing item (matched by -s/-a) instead of erroring on duplicate. Default ACL
     // (no -A): only /usr/bin/security is trusted, which is all both the GUI and schedmgr need.
+    // macOS limitation: /usr/bin/security has no stdin-password option, so the token is briefly
+    // visible in the process argument list (`ps`) for the duration of the spawn (typically <100ms).
+    // That is a lower risk than a persistent 0600 plaintext file but NOT zero; there is no CLI
+    // workaround short of calling the Keychain Services C API directly. (Linux uses stdin — no argv.)
     return { cmd: 'security', args: ['add-generic-password', '-U', '-s', service, '-a', account, '-w', token] }
   }
   if (platform === 'linux') {
