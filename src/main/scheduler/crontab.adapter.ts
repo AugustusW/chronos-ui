@@ -67,12 +67,12 @@ export class CrontabAdapter implements SchedulerAdapter {
 
   private static readonly FLUSH_MARKER = '# chronos:notify-flush'
 
-  private flushCommandPrefix(): string {
-    return `${this.opts.schedmgrPath} notify-flush`
-  }
-
+  // Legacy crontab lines (written before schedmgrPath was shell-quoted) carry the RAW path; new lines
+  // carry the shell-quoted path. Detection matches BOTH forms so existing adoptions keep working until
+  // the next reconcile rewrites them in the quoted form (review #10).
   private isFlushLine(raw: string): boolean {
-    return raw.includes(this.flushCommandPrefix())
+    const p = this.opts.schedmgrPath
+    return raw.includes(`${shellQuote(p)} notify-flush`) || raw.includes(`${p} notify-flush`)
   }
 
   async list(): Promise<ParsedJob[]> {
@@ -87,7 +87,9 @@ export class CrontabAdapter implements SchedulerAdapter {
   // (e.g. `npm run build -- --watch`), and originalFromAdopted/shellUnquote would then throw,
   // breaking list() for the whole adapter.
   private isAdoptedCommand(command: string): boolean {
-    return command.startsWith(this.opts.schedmgrPath + ' run ')
+    const p = this.opts.schedmgrPath
+    // Quoted (new) OR raw (legacy) — see isFlushLine (review #10).
+    return command.startsWith(`${shellQuote(p)} run `) || command.startsWith(`${p} run `)
   }
 
   private toParsed(j: ModelJob): ParsedJob {
@@ -186,7 +188,7 @@ export class CrontabAdapter implements SchedulerAdapter {
     )
     if (!j) return { ok: false, reason: 'error', error: 'no matching unadopted line' }
     const wrapped =
-      `${opts.scheduleExpr} ${opts.schedmgrPath} run ${chronosId} --db ${shellQuote(opts.dbPath)} ` +
+      `${opts.scheduleExpr} ${shellQuote(opts.schedmgrPath)} run ${chronosId} --db ${shellQuote(opts.dbPath)} ` +
       `-- ${shellQuote(opts.command)}`
     // Replace the job line with the wrapped line, then insert a marker comment above it.
     model.setLineRaw(j.lineIndex, wrapped)
@@ -222,7 +224,7 @@ export class CrontabAdapter implements SchedulerAdapter {
     targets.sort((a, b) => b.lineIndex - a.lineIndex)
     for (const { spec, lineIndex } of targets) {
       const wrapped =
-        `${spec.scheduleExpr} ${this.opts.schedmgrPath} run ${spec.chronosId} --db ${shellQuote(this.opts.dbPath)} ` +
+        `${spec.scheduleExpr} ${shellQuote(this.opts.schedmgrPath)} run ${spec.chronosId} --db ${shellQuote(this.opts.dbPath)} ` +
         `-- ${shellQuote(spec.command)}`
       model.setLineRaw(lineIndex, wrapped)
       model.lines.splice(lineIndex, 0, { raw: `# chronos:${spec.chronosId}` })
@@ -270,7 +272,7 @@ export class CrontabAdapter implements SchedulerAdapter {
         else model.lines.splice(i, 1)
       }
     }
-    const line = `*/${windowMin} * * * * ${this.opts.schedmgrPath} notify-flush --db ${shellQuote(this.opts.dbPath)}`
+    const line = `*/${windowMin} * * * * ${shellQuote(this.opts.schedmgrPath)} notify-flush --db ${shellQuote(this.opts.dbPath)}`
     const last = model.lines.length - 1
     const tail = model.lines.length > 0 && model.lines[last].raw === '' ? last : model.lines.length
     model.lines.splice(tail, 0, { raw: CrontabAdapter.FLUSH_MARKER }, { raw: line })

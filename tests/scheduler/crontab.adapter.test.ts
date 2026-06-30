@@ -88,11 +88,36 @@ describe('CrontabAdapter adopt/unadopt', () => {
     // full template: schedule + schedmgr run <id> --db <quoted db> -- '<quoted original>'
     // The db path MUST be shell-quoted: macOS userData is ".../Application Support/..." (has a
     // space), and cron re-parses the line via /bin/sh — an unquoted path splits and schedmgr bails.
-    expect(written).toContain(`0 3 * * * ${SCHEDMGR} run 42 --db '${DB}' -- 'backup.sh && notify.sh'`)
+    expect(written).toContain(`0 3 * * * '${SCHEDMGR}' run 42 --db '${DB}' -- 'backup.sh && notify.sh'`)
     // re-listing yields the original command back (unquoted), adopted=true
     const j = (await a.list()).find((x) => x.chronosId === 42)!
     expect(j.adopted).toBe(true)
     expect(j.command).toBe('backup.sh && notify.sh')
+  })
+
+  it('shell-quotes a spaced schedmgr path so the crontab line stays valid + round-trips (review #10)', async () => {
+    const SPACED = '/Applications/Chronos UI.app/Contents/Resources/schedmgr'
+    const { exec, state } = makeFakeExec('0 3 * * * backup.sh\n')
+    const a = new CrontabAdapter({ exec, schedmgrPath: SPACED, dbPath: DB })
+    await a.list()
+    const res = await a.adopt(7, { scheduleExpr: '0 3 * * *', command: 'backup.sh', schedmgrPath: SPACED, dbPath: DB })
+    expect(res.ok).toBe(true)
+    // the spaced path is wrapped in single quotes → ONE shell word; without this the line splits at
+    // the space and cron's /bin/sh runs the wrong binary.
+    expect(state.writes.at(-1)!).toContain(`'${SPACED}' run 7 --db`)
+    // the adapter re-detects its own quoted line as adopted (write/detect symmetry)
+    const j = (await a.list()).find((x) => x.chronosId === 7)!
+    expect(j.adopted).toBe(true)
+    expect(j.command).toBe('backup.sh')
+  })
+
+  it('still detects a legacy crontab line written with an UNQUOTED schedmgr path (backward compat — review #10)', async () => {
+    const initial = `# chronos:9\n0 3 * * * ${SCHEDMGR} run 9 --db ${DB} -- 'legacy.sh'\n`
+    const { exec } = makeFakeExec(initial)
+    const a = new CrontabAdapter({ exec, schedmgrPath: SCHEDMGR, dbPath: DB })
+    const j = (await a.list()).find((x) => x.chronosId === 9)!
+    expect(j.adopted).toBe(true) // raw (pre-shellQuote) line is still recognized
+    expect(j.command).toBe('legacy.sh')
   })
 
   it('unadopt restores the bare original command line', async () => {
@@ -206,8 +231,8 @@ describe('CrontabAdapter.adoptMany', () => {
     expect(writes).toHaveLength(1) // ONE write, not two
     expect(writes[0]).toContain('# chronos:1')
     expect(writes[0]).toContain('# chronos:2')
-    expect(writes[0]).toContain("/opt/schedmgr run 1 --db '/db/chronos.db'")
-    expect(writes[0]).toContain("/opt/schedmgr run 2 --db '/db/chronos.db'")
+    expect(writes[0]).toContain("'/opt/schedmgr' run 1 --db '/db/chronos.db'")
+    expect(writes[0]).toContain("'/opt/schedmgr' run 2 --db '/db/chronos.db'")
   })
 
   it('fails the whole batch (no write) when any spec has no matching line', async () => {
