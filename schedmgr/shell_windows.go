@@ -6,7 +6,9 @@ package main
 import (
 	"context"
 	"os/exec"
+	"strconv"
 	"syscall"
+	"time"
 )
 
 // shellCommand runs the wrapped command through cmd.exe.
@@ -35,5 +37,18 @@ import (
 func shellCommand(ctx context.Context, command string) *exec.Cmd {
 	cmd := exec.CommandContext(ctx, "cmd")
 	cmd.SysProcAttr = &syscall.SysProcAttr{CmdLine: `cmd /s /c "` + command + `"`}
+	// On timeout/cancel, kill the WHOLE process tree — not just the top cmd.exe. The default
+	// CommandContext cancel kills only cmd.Process, orphaning the command's children (e.g. a script
+	// cmd launches), and an orphan holding the stdout/stderr pipe keeps Wait() blocked. This mirrors
+	// the unix Setpgid group-kill: `taskkill /T` walks the tree from the pid, `/F` forces it, and
+	// WaitDelay is a backstop that forces Wait to return + close the pipes if a descendant lingers
+	// (review #8).
+	cmd.Cancel = func() error {
+		if cmd.Process == nil {
+			return nil
+		}
+		return exec.Command("taskkill", "/T", "/F", "/PID", strconv.Itoa(cmd.Process.Pid)).Run()
+	}
+	cmd.WaitDelay = 2 * time.Second
 	return cmd
 }
