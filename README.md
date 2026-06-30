@@ -63,7 +63,7 @@ vim, repeat                       read the run history
 ChronosUI reads your native scheduler and shows it in a clean GUI. To record the output of
 *scheduled* runs, it can "adopt" a job by wrapping its command with a small bundled binary
 (`schedmgr`) — fully transparent (same working directory, environment, and exit code) and
-one-click reversible. The exact `crontab` rewrite is documented before release.
+one-click reversible. The exact `crontab` rewrite is documented in [docs/crontab.md](docs/crontab.md).
 
 ## macOS permissions
 
