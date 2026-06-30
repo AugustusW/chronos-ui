@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { sqliteTable, integer, text } from 'drizzle-orm/sqlite-core'
+import { sqliteTable, integer, text, index } from 'drizzle-orm/sqlite-core'
 
 // DB column names are camelCase, identical to spec §7's field list, so the SQLite file is the
 // literal cross-language contract the Go schedmgr (Plan 3) writes against.
@@ -47,7 +47,13 @@ export const runLogs = sqliteTable('run_logs', {
   createdAt: integer('createdAt', { mode: 'timestamp_ms' })
     .notNull()
     .$defaultFn(() => new Date())
-})
+}, (t) => ({
+  // Composite index for the hot queries listRunsForJob / getLatestRun:
+  // WHERE jobId=? ORDER BY startedAt DESC, id DESC. An ASC index serves the DESC order via a reverse
+  // scan, and also bounds the retention DELETE (… WHERE startedAt < cutoff). Neither SQLite nor pg
+  // auto-indexes a referencing FK column, so without this both backends full-scan + sort (review #4).
+  jobStartedIdx: index('run_logs_jobId_startedAt_id_idx').on(t.jobId, t.startedAt, t.id)
+}))
 
 export const notifySettings = sqliteTable('notify_settings', {
   id: integer('id').primaryKey(), // always 1 (singleton)

@@ -1,0 +1,1 @@
+CREATE INDEX `run_logs_jobId_startedAt_id_idx` ON `run_logs` (`jobId`,`startedAt`,`id`);
