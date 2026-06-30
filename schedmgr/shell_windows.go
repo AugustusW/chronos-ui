@@ -5,6 +5,8 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"os/exec"
 	"strconv"
 	"syscall"
@@ -47,7 +49,13 @@ func shellCommand(ctx context.Context, command string) *exec.Cmd {
 		if cmd.Process == nil {
 			return nil
 		}
-		return exec.Command("taskkill", "/T", "/F", "/PID", strconv.Itoa(cmd.Process.Pid)).Run()
+		// Return nil even if taskkill fails (commonly because the process already exited): a non-nil
+		// Cancel error makes Go's Wait wrap it, which would mislabel a clean just-finished run as a
+		// failure. Log it for diagnostics instead (review follow-up).
+		if err := exec.Command("taskkill", "/T", "/F", "/PID", strconv.Itoa(cmd.Process.Pid)).Run(); err != nil {
+			fmt.Fprintf(os.Stderr, "schedmgr: taskkill /T failed (pid=%d): %v\n", cmd.Process.Pid, err)
+		}
+		return nil
 	}
 	cmd.WaitDelay = 2 * time.Second
 	return cmd
