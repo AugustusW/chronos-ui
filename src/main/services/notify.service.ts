@@ -11,8 +11,8 @@ import { NOTIFY_TOKEN_SERVICE, keychainWriteSupported, keychainStore, keychainRe
  *  Linux); 'file' = a 0600 plaintext file (Windows, or a keychain-write failure) — surfaced so the UI
  *  can warn the user it is unencrypted. */
 export type TokenStorage = 'keychain' | 'file'
-export type NotifySettingsDTO = { enabled: boolean; chatId: string | null; windowMin: number; tokenSet: boolean; tokenStorage: TokenStorage | null }
-export type NotifySaveInput = { enabled: boolean; chatId: string | null; windowMin: number; token?: string }
+export type NotifySettingsDTO = { enabled: boolean; chatId: string | null; windowMin: number; includeStderr: boolean; tokenSet: boolean; tokenStorage: TokenStorage | null }
+export type NotifySaveInput = { enabled: boolean; chatId: string | null; windowMin: number; includeStderr?: boolean; token?: string }
 export type SaveResult = { ok: boolean; settings?: NotifySettingsDTO; flushWarning?: string }
 
 const KEYCHAIN_ACCOUNT = 'chronos-ui'
@@ -84,9 +84,9 @@ export function createNotifyService(deps: NotifyServiceDeps): NotifyService {
     }
     return existsSync(tokenPath) ? 'file' : null
   }
-  const toDTO = async (s: { enabled: boolean; chatId: string | null; windowMin: number }): Promise<NotifySettingsDTO> => {
+  const toDTO = async (s: { enabled: boolean; chatId: string | null; windowMin: number; includeStderr: boolean }): Promise<NotifySettingsDTO> => {
     const storage = await tokenStorage()
-    return { enabled: s.enabled, chatId: s.chatId, windowMin: s.windowMin, tokenSet: storage !== null, tokenStorage: storage }
+    return { enabled: s.enabled, chatId: s.chatId, windowMin: s.windowMin, includeStderr: s.includeStderr, tokenSet: storage !== null, tokenStorage: storage }
   }
 
   return {
@@ -117,7 +117,7 @@ export function createNotifyService(deps: NotifyServiceDeps): NotifyService {
       }
 
       if (input.token !== undefined && input.token !== '') await storeToken(input.token)
-      const saved = await deps.repos.notifySettings.save({ enabled: input.enabled, chatId: input.chatId, windowMin: input.windowMin })
+      const saved = await deps.repos.notifySettings.save({ enabled: input.enabled, chatId: input.chatId, windowMin: input.windowMin, includeStderr: input.includeStderr ?? false })
 
       const wantFlush = input.enabled && input.windowMin >= 1
       try {

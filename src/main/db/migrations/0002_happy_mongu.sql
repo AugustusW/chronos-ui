@@ -1,0 +1,1 @@
+ALTER TABLE `notify_settings` ADD `includeStderr` integer DEFAULT false NOT NULL;

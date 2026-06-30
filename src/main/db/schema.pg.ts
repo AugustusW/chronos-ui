@@ -50,6 +50,9 @@ export const notifySettings = pgTable('notify_settings', {
   enabled: boolean('enabled').notNull().default(false),
   chatId: text('chatId'),
   windowMin: integer('windowMin').notNull().default(0),
+  // Opt-in (default off): include the failed job's stderr tail in immediate alerts (stderr can carry
+  // secrets, so sending it to Telegram is an explicit user choice). Mirrors schema.ts.
+  includeStderr: boolean('includeStderr').notNull().default(false),
   updatedAt: ts('updatedAt').notNull().$defaultFn(() => new Date())
 })
 
