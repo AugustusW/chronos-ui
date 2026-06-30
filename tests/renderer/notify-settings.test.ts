@@ -44,4 +44,17 @@ describe('SettingsView notifications', () => {
     await flushPromises()
     expect(w.text()).toMatch(/sent|✅|success/i)
   })
+  it('shows the unencrypted-storage warning when tokenStorage is "file" (code review #1)', async () => {
+    window.chronos.getNotifySettings = vi.fn(async () => ({ enabled: true, chatId: '42', windowMin: 0, tokenSet: true, tokenStorage: 'file' }))
+    const w = mount(SettingsView)
+    await flushPromises()
+    expect(w.find('[data-test="notify-token-storage-warn"]').exists()).toBe(true)
+    expect(w.text()).toMatch(/unencrypted/i)
+  })
+  it('hides the storage warning when tokenStorage is "keychain"', async () => {
+    window.chronos.getNotifySettings = vi.fn(async () => ({ enabled: true, chatId: '42', windowMin: 0, tokenSet: true, tokenStorage: 'keychain' }))
+    const w = mount(SettingsView)
+    await flushPromises()
+    expect(w.find('[data-test="notify-token-storage-warn"]').exists()).toBe(false)
+  })
 })
