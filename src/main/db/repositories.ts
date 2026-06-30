@@ -33,6 +33,8 @@ export interface RunLogsRepo {
   listRecent(limit?: number): Promise<RunLog[]>
   listForJob(jobId: number, limit?: number): Promise<RunLog[]>
   getLatest(jobId: number): Promise<RunLog | undefined>
+  /** Delete runs older than `cutoff` (retention sweep); returns rows removed. */
+  pruneOlderThan(cutoff: Date): Promise<number>
 }
 
 export interface Repositories {
@@ -61,7 +63,8 @@ function sqliteRepos(db: SqliteDb): Repositories {
       finishRun: async (id, input) => sr.finishRun(db, id, input),
       listRecent: async (limit) => sr.listRecentRuns(db, limit),
       listForJob: async (jobId, limit) => sr.listRunsForJob(db, jobId, limit),
-      getLatest: async (jobId) => sr.getLatestRun(db, jobId)
+      getLatest: async (jobId) => sr.getLatestRun(db, jobId),
+      pruneOlderThan: async (cutoff) => sr.pruneRunsOlderThan(db, cutoff)
     },
     notifySettings: createSqliteNotifySettingsRepo(db)
   }

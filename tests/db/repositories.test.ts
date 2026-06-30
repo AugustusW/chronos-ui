@@ -131,5 +131,17 @@ for (const backend of backends) {
       expect(run.startedAt.getTime()).toBe(startedAt.getTime())
       expect((await repos.runLogs.getLatest(j.id))!.startedAt.getTime()).toBe(startedAt.getTime())
     })
+
+    it('pruneOlderThan removes runs before the cutoff and keeps newer ones (review #4)', async () => {
+      const j = await repos.jobs.create({ ...baseJob })
+      const DAY = 24 * 60 * 60 * 1000
+      const old = await repos.runLogs.startRun({ jobId: j.id, triggeredBy: 'schedule', startedAt: new Date(Date.now() - 100 * DAY) })
+      const recent = await repos.runLogs.startRun({ jobId: j.id, triggeredBy: 'schedule', startedAt: new Date(Date.now() - 1 * DAY) })
+      const removed = await repos.runLogs.pruneOlderThan(new Date(Date.now() - 90 * DAY))
+      expect(removed).toBe(1)
+      const remaining = await repos.runLogs.listForJob(j.id)
+      expect(remaining.map((r) => r.id)).toEqual([recent.id])
+      expect(remaining.map((r) => r.id)).not.toContain(old.id)
+    })
   })
 }
