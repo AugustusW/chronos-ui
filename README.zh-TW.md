@@ -58,6 +58,12 @@ vim、重來一遍                     翻執行歷史
 - ✓ 預設 SQLite，可選 PostgreSQL
 - ✓ 跨平台（macOS、Windows；Linux 走 cron）
 
+## 截圖
+
+<p align="center">
+  <img src="docs/screenshot-schedules.png" alt="ChronosUI 排程總覽畫面 — 依分類群組顯示已接管與未接管的 cron job，可執行、啟停、接管" width="800">
+</p>
+
 ## 運作方式
 
 ChronosUI 讀取你的原生排程器、用乾淨的 GUI 呈現。要記錄「排程自動跑」的輸出，它可以「接管」一個 job——
