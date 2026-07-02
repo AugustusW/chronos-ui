@@ -5,6 +5,9 @@
 [English](./README.md) | 繁體中文
 
 [![CI](https://github.com/AugustusW/chronos-ui/actions/workflows/ci.yml/badge.svg)](https://github.com/AugustusW/chronos-ui/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
+[![GitHub release](https://img.shields.io/github/v/release/AugustusW/chronos-ui)](https://github.com/AugustusW/chronos-ui/releases/latest)
+[![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-lightgrey.svg)](https://github.com/AugustusW/chronos-ui/releases/latest)
 
 一個給你「已經在用」的排程器用的桌面控制中心——**crontab**（macOS/Linux）與 **Windows 工作排程器**。
 不裝 daemon、不綁定、不用搬家。ChronosUI 不取代 cron / launchd / 工作排程器，而是讓它們**看得見**：
