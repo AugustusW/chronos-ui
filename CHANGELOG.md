@@ -40,3 +40,11 @@ All notable changes to ChronosUI are documented here. The format is based on
 ## [0.1.0] — 2026-06
 - Initial public release: read your native scheduler (crontab on macOS/Linux, Task Scheduler on
   Windows) in a GUI, adopt jobs to record output, run-now with live output.
+
+[Unreleased]: https://github.com/AugustusW/chronos-ui/compare/v0.1.5...HEAD
+[0.1.5]: https://github.com/AugustusW/chronos-ui/compare/v0.1.4...v0.1.5
+[0.1.4]: https://github.com/AugustusW/chronos-ui/compare/v0.1.3...v0.1.4
+[0.1.3]: https://github.com/AugustusW/chronos-ui/compare/v0.1.2...v0.1.3
+[0.1.2]: https://github.com/AugustusW/chronos-ui/compare/v0.1.1...v0.1.2
+[0.1.1]: https://github.com/AugustusW/chronos-ui/compare/e8dfdda67297558fc0b6a58f6abca09092eb5230...v0.1.1
+[0.1.0]: https://github.com/AugustusW/chronos-ui/commit/e8dfdda67297558fc0b6a58f6abca09092eb5230
