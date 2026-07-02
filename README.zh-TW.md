@@ -59,7 +59,7 @@ vim、重來一遍                     翻執行歷史
 
 ChronosUI 讀取你的原生排程器、用乾淨的 GUI 呈現。要記錄「排程自動跑」的輸出，它可以「接管」一個 job——
 用一個隨附的小程式（`schedmgr`）把指令包起來——完全透明（相同工作目錄、環境變數、exit code），且一鍵可還原。
-完整細節與 `crontab` 改寫方式會在發佈前寫清楚。
+實際的 `crontab` 改寫方式記載在 [docs/crontab.md](docs/crontab.md)。
 
 ## macOS 權限
 
