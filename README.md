@@ -61,6 +61,12 @@ vim, repeat                       read the run history
 - ✓ SQLite by default, PostgreSQL optional
 - ✓ Cross-platform (macOS, Windows; Linux via cron)
 
+## Screenshot
+
+<p align="center">
+  <img src="docs/screenshot-schedules.png" alt="ChronosUI Schedules view — managed and unmanaged cron jobs grouped by category, with run, enable, and adopt actions" width="800">
+</p>
+
 ## How it works
 
 ChronosUI reads your native scheduler and shows it in a clean GUI. To record the output of
