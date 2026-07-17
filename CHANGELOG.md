@@ -9,9 +9,9 @@ All notable changes to ChronosUI are documented here. The format is based on
 ### Added
 - Switch the app between SQLite and PostgreSQL right from Settings: enter a DSN, test the
   connection, and optionally migrate your existing jobs/run history/notification settings over in
-  one step. The DSN is stored in the OS keychain (never in the config file or logs), and the app
-  falls back to SQLite with a clear error if it can't reach the configured PostgreSQL database on
-  boot.
+  one step. The DSN is stored in the OS keychain (never in the config file or logs), and if the app
+  can't reach the configured PostgreSQL database on boot, a dialog explains why and offers starting
+  with SQLite for that session instead of silently running against the wrong (or no) database.
 
 ## [0.1.5] — 2026-06-30
 
