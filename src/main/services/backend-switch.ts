@@ -25,9 +25,9 @@ import { createRepositories } from '../db/repositories'
 import * as sqliteSchema from '../db/schema'
 import * as pgSchema from '../db/schema.pg'
 import type { Job } from '../db/schema'
-import { readBackendConfig, writeBackendConfig, type BackendConfigFile, type ConfigApp } from '../db/backendConfig'
+import { writeBackendConfig, type BackendConfigFile, type ConfigApp } from '../db/backendConfig'
 import { schedmgrDbDescriptor } from '../scheduler/descriptor'
-import type { SchedulerAdapter, WriteResult } from '../scheduler/types'
+import type { SchedulerAdapter } from '../scheduler/types'
 import { redactDsn } from './pg-dsn'
 import { pgSecretStore, type PgSecretDeps } from './pg-secret'
 
@@ -226,7 +226,11 @@ export class CopyCountMismatchError extends Error {
  *  one if the job itself printed binary-ish output. Strip rather than reject: a lost NUL byte in
  *  historical log text is a cosmetic loss, not a data-integrity one. */
 function stripNul(text: string): string {
-  return text.replace(/\u0000/g, '')
+  // split/join on the literal character rather than a /.../g regex: eslint's no-control-regex
+  // flags any control character inside a regex literal (a real footgun rule in general -- control
+  // chars in a regex are a classic ReDoS/obfuscation smell -- even though this specific escaped
+  // use is intentional and safe). split/join sidesteps the rule entirely, no regex needed.
+  return text.split('\u0000').join('')
 }
 
 export interface CopyDataDeps {
