@@ -29,7 +29,7 @@ import { writeBackendConfig, type BackendConfigFile, type ConfigApp } from '../d
 import { schedmgrDbDescriptor } from '../scheduler/descriptor'
 import type { SchedulerAdapter } from '../scheduler/types'
 import { redactDsn } from './pg-dsn'
-import { pgSecretStore, type PgSecretDeps } from './pg-secret'
+import { pgSecretStore, pgSecretDelete, type PgSecretDeps } from './pg-secret'
 
 /** Keychain service ChronosUI stores the active Postgres DSN under (mirrors the literal string
  *  already exercised by tests/bootstrap.test.ts + tests/scheduler/descriptor.test.ts). */
@@ -437,6 +437,10 @@ export interface SwitchToPostgresDeps {
   assertTargetEmpty?: typeof assertTargetEmpty
   copyData?: typeof copyData
   pgSecretStore?: typeof pgSecretStore
+  /** Best-effort delete of the pg DSN credential (I2) — invoked from the finalize cleanup branch so
+   *  a reverted switch never leaves an orphaned keychain item / fallback file behind. Never throws
+   *  (pg-secret.ts); defaults to the real exported pgSecretDelete. */
+  pgSecretDelete?: typeof pgSecretDelete
   rebakeDescriptors?: typeof rebakeDescriptors
   truncateTarget?: typeof truncateTarget
 }
@@ -450,6 +454,7 @@ export async function switchToPostgres(config: SwitchToPostgresConfig, deps: Swi
   const _assertTargetEmpty = deps.assertTargetEmpty ?? assertTargetEmpty
   const _copyData = deps.copyData ?? copyData
   const _pgSecretStore = deps.pgSecretStore ?? pgSecretStore
+  const _pgSecretDelete = deps.pgSecretDelete ?? pgSecretDelete
   const _rebakeDescriptors = deps.rebakeDescriptors ?? rebakeDescriptors
   const _truncateTarget = deps.truncateTarget ?? truncateTarget
   const _loadJobs = deps.loadJobs ?? (() => createRepositories(deps.sqliteHandle).jobs.list())
@@ -463,13 +468,17 @@ export async function switchToPostgres(config: SwitchToPostgresConfig, deps: Swi
   try {
     await _assertTargetEmpty(config.dsn)
   } catch (err) {
-    return { ok: false, error: errMessage(err), stage: 'assertTargetEmpty' }
+    // I1: some pg/libpq failure paths embed the raw DSN verbatim in the thrown error (same concern
+    // testConnection's own redactError guards against) — never let that leak through un-redacted.
+    return { ok: false, error: redactError(err, config.dsn), stage: 'assertTargetEmpty' }
   }
 
   // Nothing has been committed to the target yet at this point (testConnection/migrateTarget only
   // apply schema DDL, which is idempotent and not "data"; assertTargetEmpty is read-only) — every
-  // early return above needs no cleanup. `copied` gates cleanup below: once copyData has committed
-  // its transaction, a later failure must undo it (config + descriptor + target rows).
+  // early return above needs no cleanup. `copied` tracks whether copyData actually committed rows
+  // into the target — ONLY truncateTarget below is gated on it (wiping an untouched target is
+  // pointless, not unsafe); config/descriptor/credential cleanup runs unconditionally regardless of
+  // `copied` (C1 — see the finalize catch below for why).
   let copied = false
   if (config.copy) {
     try {
@@ -478,7 +487,7 @@ export async function switchToPostgres(config: SwitchToPostgresConfig, deps: Swi
     } catch (err) {
       // copyData's own transaction already rolled back on failure (T7) — the target is exactly as
       // empty as assertTargetEmpty found it, so there is nothing here to clean up either.
-      return { ok: false, error: errMessage(err), stage: 'copyData' }
+      return { ok: false, error: redactError(err, config.dsn), stage: 'copyData' }
     }
   }
 
@@ -493,16 +502,24 @@ export async function switchToPostgres(config: SwitchToPostgresConfig, deps: Swi
     }
     return { ok: true, needRelaunch: true }
   } catch (err) {
+    // C1: config + native-descriptor revert (and the I2 credential delete below) are attempted
+    // UNCONDITIONALLY here, not gated on `copied` — this catch can be reached by a copy:false switch
+    // too (e.g. writeBackendConfig(postgres) already committed and THEN rebakeDescriptors fails), and
+    // the old `if (copied) {...}` gate around this whole block left config/cron stranded on a
+    // half-applied postgres state in exactly that case while still reporting ok:false. Every one of
+    // these three is safe to attempt even when nothing actually advanced that far: writeBackendConfig
+    // ('sqlite') is a no-op-in-effect when the config was still sqlite, rebakeDescriptors('sqlite') is
+    // idempotent against jobs already on the sqlite descriptor, and pgSecretDelete never throws
+    // (best-effort against a possibly never-written credential). Only truncateTarget stays gated on
+    // `copied` (see above) — best-effort past the config write either way (never let a cleanup
+    // failure mask the original error below).
+    writeBackendConfig(deps.configApp, { backend: 'sqlite' })
+    await _rebakeDescriptors({ backend: 'sqlite' }, deps.sqlitePath, jobs, deps.rebake).catch(() => undefined)
+    await _pgSecretDelete(pgService, deps.secretDeps).catch(() => undefined)
     if (copied) {
-      // Undo, in the same order the happy path applied them: config back to sqlite, native cron
-      // lines re-baked back to the sqlite descriptor, target rows wiped so a retry's
-      // assertTargetEmpty passes again. Best-effort past the config write (never let a cleanup
-      // failure mask the original error below).
-      writeBackendConfig(deps.configApp, { backend: 'sqlite' })
-      await _rebakeDescriptors({ backend: 'sqlite' }, deps.sqlitePath, jobs, deps.rebake).catch(() => undefined)
       await _truncateTarget(config.dsn).catch(() => undefined)
     }
-    return { ok: false, error: errMessage(err), stage: 'finalize' }
+    return { ok: false, error: redactError(err, config.dsn), stage: 'finalize' }
   }
 }
 

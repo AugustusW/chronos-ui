@@ -22,6 +22,7 @@ import {
 import type { AdoptOptions, WriteResult } from '../../src/main/scheduler/types'
 import type { Job } from '../../src/main/db/schema'
 import { readBackendConfig } from '../../src/main/db/backendConfig'
+import { pgSecretDelete } from '../../src/main/services/pg-secret'
 
 function fakeClient(over: Partial<PgClientLike> = {}): PgClientLike {
   return {
@@ -249,6 +250,7 @@ describe('switchToPostgres (T8, mocked steps)', () => {
       assertTargetEmpty: vi.fn(async () => undefined),
       copyData: vi.fn(async () => OK_COPY),
       pgSecretStore: vi.fn(async () => undefined),
+      pgSecretDelete: vi.fn(async () => undefined),
       rebakeDescriptors: vi.fn(async () => OK_REBAKE),
       truncateTarget: vi.fn(async () => undefined),
       ...over
@@ -272,6 +274,7 @@ describe('switchToPostgres (T8, mocked steps)', () => {
     )
     expect(readBackendConfig(configApp())).toEqual({ backend: 'postgres', pgService: PG_DSN_SERVICE })
     expect(deps.truncateTarget).not.toHaveBeenCalled()
+    expect(deps.pgSecretDelete).not.toHaveBeenCalled() // happy path never deletes what it just stored
   })
 
   it('copy:false skips copyData entirely but still finalizes', async () => {
@@ -314,6 +317,20 @@ describe('switchToPostgres (T8, mocked steps)', () => {
     expect(deps.pgSecretStore).not.toHaveBeenCalled()
   })
 
+  it('I1: redacts a raw DSN embedded in an assertTargetEmpty-stage driver error before returning it', async () => {
+    const dsn = 'postgresql://u:SECRET@h/db'
+    const deps = baseDeps({
+      assertTargetEmpty: vi.fn(async () => { throw new Error(`invalid connection string: ${dsn}`) })
+    })
+    const res = await switchToPostgres({ dsn, copy: true }, deps)
+    expect(res.ok).toBe(false)
+    if (!res.ok) {
+      expect(res.stage).toBe('assertTargetEmpty')
+      expect(res.error).not.toContain('SECRET')
+      expect(res.error).toContain('***')
+    }
+  })
+
   it('aborts at copyData without any cleanup (nothing was ever committed — the copy transaction itself rolled back)', async () => {
     const deps = baseDeps({ copyData: vi.fn(async () => { throw new Error('count mismatch') }) })
     const res = await switchToPostgres({ dsn: 'postgresql://u:p@h/db', copy: true }, deps)
@@ -322,7 +339,21 @@ describe('switchToPostgres (T8, mocked steps)', () => {
     expect(deps.truncateTarget).not.toHaveBeenCalled() // nothing to clean up — copy itself already rolled back
   })
 
-  it('cleanup-on-failure: pgSecretStore fails AFTER a successful copy — reverts config to sqlite, re-bakes to sqlite, truncates the target', async () => {
+  it('I1: redacts a raw DSN embedded in a copyData-stage driver error before returning it', async () => {
+    const dsn = 'postgresql://u:SECRET@h/db'
+    const deps = baseDeps({
+      copyData: vi.fn(async () => { throw new Error(`invalid connection string: ${dsn}`) })
+    })
+    const res = await switchToPostgres({ dsn, copy: true }, deps)
+    expect(res.ok).toBe(false)
+    if (!res.ok) {
+      expect(res.stage).toBe('copyData')
+      expect(res.error).not.toContain('SECRET')
+      expect(res.error).toContain('***')
+    }
+  })
+
+  it('cleanup-on-failure: pgSecretStore fails AFTER a successful copy — reverts config to sqlite, re-bakes to sqlite, deletes the credential, truncates the target', async () => {
     const deps = baseDeps({
       pgSecretStore: vi.fn(async () => { throw new Error('keychain + fallback file both failed') })
     })
@@ -331,9 +362,28 @@ describe('switchToPostgres (T8, mocked steps)', () => {
     expect(readBackendConfig(configApp())).toEqual({ backend: 'sqlite' })
     expect(deps.rebakeDescriptors).toHaveBeenCalledWith({ backend: 'sqlite' }, '/db/chronos.db', [], deps.rebake)
     expect(deps.truncateTarget).toHaveBeenCalledWith('postgresql://u:p@h/db')
+    // I2: pgSecretStore itself threw here (never actually wrote anything), but the cleanup branch
+    // still attempts the delete unconditionally — pgSecretDelete is a safe no-op against a
+    // never-written credential (pg-secret.ts: it never throws), so there is no reason to gate it on
+    // whether the store call happened to get that far.
+    expect(deps.pgSecretDelete).toHaveBeenCalledWith(PG_DSN_SERVICE, deps.secretDeps)
   })
 
-  it('cleanup-on-failure: rebakeDescriptors reports errors AFTER a successful copy — same cleanup path', async () => {
+  it('I1: redacts a raw DSN embedded in a finalize-stage driver error (pgSecretStore) before returning it', async () => {
+    const dsn = 'postgresql://u:SECRET@h/db'
+    const deps = baseDeps({
+      pgSecretStore: vi.fn(async () => { throw new Error(`invalid connection string: ${dsn}`) })
+    })
+    const res = await switchToPostgres({ dsn, copy: true }, deps)
+    expect(res.ok).toBe(false)
+    if (!res.ok) {
+      expect(res.stage).toBe('finalize')
+      expect(res.error).not.toContain('SECRET')
+      expect(res.error).toContain('***')
+    }
+  })
+
+  it('cleanup-on-failure: rebakeDescriptors reports errors AFTER a successful copy — same cleanup path (incl. credential delete)', async () => {
     const deps = baseDeps({
       rebakeDescriptors: vi
         .fn()
@@ -348,17 +398,52 @@ describe('switchToPostgres (T8, mocked steps)', () => {
     }
     expect(readBackendConfig(configApp())).toEqual({ backend: 'sqlite' })
     expect(deps.truncateTarget).toHaveBeenCalledOnce()
+    // I2: pgSecretStore DID succeed here before rebakeDescriptors failed — the just-stored credential
+    // must not be left orphaned in the keychain once the switch reverts to sqlite.
+    expect(deps.pgSecretDelete).toHaveBeenCalledWith(PG_DSN_SERVICE, deps.secretDeps)
   })
 
-  it('cleanup-on-failure does NOT run when copy:false (nothing was ever copied into the target to clean up)', async () => {
+  it('C1: copy:false — truncateTarget never runs (nothing was copied), but config/rebake/secret-delete cleanup still does', async () => {
     const deps = baseDeps({
       pgSecretStore: vi.fn(async () => { throw new Error('boom') })
     })
     const res = await switchToPostgres({ dsn: 'postgresql://u:p@h/db', copy: false }, deps)
     expect(res).toEqual({ ok: false, error: 'boom', stage: 'finalize' })
+    // truncateTarget is still correctly gated on `copied` — copy:false never wrote real rows into
+    // the target, so there's nothing there to wipe.
     expect(deps.truncateTarget).not.toHaveBeenCalled()
-    // config/descriptor cleanup still doesn't need to run (they were never advanced past sqlite either).
+    // But the rest of the cleanup branch is now UNCONDITIONAL (C1): before this fix, `copied` stays
+    // false for copy:false, so the entire `if (copied) {...}` block — including the config/rebake
+    // revert — was skipped, even though pgSecretStore is called (and here, fails) exactly the same
+    // way regardless of `config.copy`. Without the fix, deps.rebakeDescriptors below would never be
+    // invoked at all for this scenario.
     expect(readBackendConfig(configApp())).toEqual({ backend: 'sqlite' })
+    expect(deps.rebakeDescriptors).toHaveBeenCalledWith({ backend: 'sqlite' }, '/db/chronos.db', [], deps.rebake)
+    expect(deps.pgSecretDelete).toHaveBeenCalledWith(PG_DSN_SERVICE, deps.secretDeps)
+  })
+
+  it('C1: copy:false + rebakeDescriptors fails AFTER writeBackendConfig(postgres) already committed — config must still revert to sqlite, not strand on postgres', async () => {
+    const deps = baseDeps({
+      rebakeDescriptors: vi
+        .fn()
+        .mockResolvedValueOnce({ ok: false, rebaked: [], errors: [{ id: 1, error: 'no matching unadopted line' }] })
+        .mockResolvedValueOnce(OK_REBAKE) // the cleanup path's own re-bake-to-sqlite call
+    })
+    const res = await switchToPostgres({ dsn: 'postgresql://u:p@h/db', copy: false }, deps)
+    expect(res.ok).toBe(false)
+    if (!res.ok) {
+      expect(res.stage).toBe('finalize')
+      expect(res.error).toContain('no matching unadopted line')
+    }
+    // The real bug this test pins down: writeBackendConfig(postgres) DID commit for real here (it
+    // runs unconditionally, before the rebake call that then fails) — a copy:false switch reaching
+    // this point without the C1 fix would leave backendConfig.json on 'postgres' (and the native
+    // cron lines half-rebaked) while reporting ok:false, because `copied` stayed false the whole
+    // time and gated OFF the only cleanup that would have reverted it.
+    expect(readBackendConfig(configApp())).toEqual({ backend: 'sqlite' })
+    expect(deps.rebakeDescriptors).toHaveBeenLastCalledWith({ backend: 'sqlite' }, '/db/chronos.db', [], deps.rebake)
+    expect(deps.truncateTarget).not.toHaveBeenCalled()
+    expect(deps.pgSecretDelete).toHaveBeenCalledWith(PG_DSN_SERVICE, deps.secretDeps)
   })
 
   it('retry after cleanup succeeds: a mid-fail then a second call with the same (now-working) deps completes', async () => {
@@ -407,16 +492,15 @@ describe('switchToSqlite (T9, mocked steps)', () => {
   }
 
   it('writes the sqlite backendConfig and re-bakes every adopted job back to the plain file path', async () => {
-    const deps = baseDeps({ loadJobs: async () => [job({ id: 1, scheduleExpr: '* * * * *', command: '/x.sh', adopted: true })] })
+    // A single shared fixture object (not two separate `job(...)` calls) — `job()` stamps
+    // createdAt/updatedAt with `new Date()` on each call, and two independently-constructed Date
+    // objects can land in different milliseconds, which previously made this assertion flaky.
+    const j = job({ id: 1, scheduleExpr: '* * * * *', command: '/x.sh', adopted: true })
+    const deps = baseDeps({ loadJobs: async () => [j] })
     const res = await switchToSqlite(deps)
     expect(res).toEqual({ ok: true, needRelaunch: true })
     expect(readBackendConfig(configApp())).toEqual({ backend: 'sqlite' })
-    expect(deps.rebakeDescriptors).toHaveBeenCalledWith(
-      { backend: 'sqlite' },
-      '/db/chronos.db',
-      [job({ id: 1, scheduleExpr: '* * * * *', command: '/x.sh', adopted: true })],
-      deps.rebake
-    )
+    expect(deps.rebakeDescriptors).toHaveBeenCalledWith({ backend: 'sqlite' }, '/db/chronos.db', [j], deps.rebake)
   })
 
   it('surfaces a rebake failure without throwing (config is already correctly sqlite either way)', async () => {
