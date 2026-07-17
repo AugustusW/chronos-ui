@@ -22,7 +22,6 @@ import {
 import type { AdoptOptions, WriteResult } from '../../src/main/scheduler/types'
 import type { Job } from '../../src/main/db/schema'
 import { readBackendConfig } from '../../src/main/db/backendConfig'
-import { pgSecretDelete } from '../../src/main/services/pg-secret'
 
 function fakeClient(over: Partial<PgClientLike> = {}): PgClientLike {
   return {
