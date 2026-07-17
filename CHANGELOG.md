@@ -6,6 +6,8 @@ All notable changes to ChronosUI are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-07-18
+
 ### Added
 - Switch the app between SQLite and PostgreSQL right from Settings: enter a DSN, test the
   connection, and optionally migrate your existing jobs/run history/notification settings over in
