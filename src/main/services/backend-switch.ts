@@ -311,3 +311,69 @@ export async function copyData(
     await pgHandle.close()
   }
 }
+
+// ---------------------------------------------------------------------------------------------
+// T10 — rebakeDescriptors: rewrite the schedmgr `--db` argument baked into every already-ADOPTED
+// cron/Task line so it points at the new backend. A plain created-but-not-adopted job (jobs.service
+// createJob) is never schedmgr-wrapped in the first place (no `--db` to rewrite), so only
+// `adopted` jobs are touched. There is no adapter method to edit an adopted line's `--db` in
+// place — updateJob() explicitly refuses to touch an adopted job's command (crontab.adapter.ts:
+// "cannot change command of an adopted job; unadopt then adopt") — so this reuses the SAME
+// unadopt-then-re-adopt recovery pattern jobs.service.ts's unadopt() already uses to keep the
+// native line and the DB `adopted` flag in sync after a failed DB write. The DB `adopted` flag
+// itself is never touched here: from the DB's perspective the job stays adopted throughout: only
+// the native scheduler line's `--db` value changes.
+// ---------------------------------------------------------------------------------------------
+
+export interface RebakeDeps {
+  /** Only the two adapter methods this needs — a plain object literal or a fake adapter satisfies
+   *  this without needing to implement all of SchedulerAdapter. */
+  adapter: Pick<SchedulerAdapter, 'unadopt' | 'adopt'>
+  schedmgrPath: string
+}
+
+export interface RebakeResult {
+  ok: boolean
+  /** chronosIds successfully rewritten. */
+  rebaked: number[]
+  errors: Array<{ id: number; error: string }>
+}
+
+/** Re-bake every adopted job's `--db` to `schedmgrDbDescriptor(cfg, sqlitePath)` (descriptor.ts —
+ *  `pg:keychain:<pgService>` for postgres, the plain file path for sqlite). Per-job failures are
+ *  collected rather than aborting the whole batch (each cron line is independent); a job whose
+ *  unadopt() fails is left as-is (still adopted, still on the OLD descriptor) and is NOT re-adopted
+ *  (there is nothing to re-wrap — the native line was never unwrapped). `jobs` is caller-supplied
+ *  (read from whichever DB handle is currently authoritative — always sqlite today; see the
+ *  module-level comment on why the boot-time handle is always sqlite for now) rather than fetched
+ *  here, keeping this function a pure orchestration over already-loaded data. */
+export async function rebakeDescriptors(
+  cfg: BackendConfigFile,
+  sqlitePath: string,
+  jobs: Pick<Job, 'id' | 'scheduleExpr' | 'command' | 'adopted'>[],
+  deps: RebakeDeps
+): Promise<RebakeResult> {
+  const descriptor = schedmgrDbDescriptor(cfg, sqlitePath)
+  const rebaked: number[] = []
+  const errors: Array<{ id: number; error: string }> = []
+  for (const j of jobs) {
+    if (!j.adopted) continue
+    const un = await deps.adapter.unadopt(j.id, j.command)
+    if (!un.ok) {
+      errors.push({ id: j.id, error: un.error ?? 'unadopt failed' })
+      continue
+    }
+    const ad = await deps.adapter.adopt(j.id, {
+      scheduleExpr: j.scheduleExpr,
+      command: j.command,
+      schedmgrPath: deps.schedmgrPath,
+      dbPath: descriptor
+    })
+    if (!ad.ok) {
+      errors.push({ id: j.id, error: ad.error ?? 'adopt failed' })
+      continue
+    }
+    rebaked.push(j.id)
+  }
+  return { ok: errors.length === 0, rebaked, errors }
+}
