@@ -2,7 +2,7 @@
 import { ipcMain } from 'electron'
 import { IPC, type AppVersion } from '../shared/ipc-contract'
 import { isNotifyTokenFormat, isChatIdFormat } from '../shared/notify-validation'
-import type { CreateJobInput, UpdateJobChanges, AdoptItem, ReconcileResult, RunNowResult, PgDsnParts, PgSaveSwitchInput, PgSaveSwitchResult } from '../shared/ipc-contract'
+import type { CreateJobInput, UpdateJobChanges, AdoptItem, ReconcileResult, RunNowResult, PgDsnParts, PgSaveSwitchInput, PgSaveSwitchResult, PgStatus } from '../shared/ipc-contract'
 import type { JobsService } from './services/jobs.service'
 import type { NotifyService, NotifySaveInput } from './services/notify.service'
 import type { RunLog } from './db/schema'
@@ -25,6 +25,10 @@ export interface IpcDeps {
   pgTestConnection: (dsn: string) => Promise<TestConnectionResult>
   pgSwitchToPostgres: (config: { dsn: string; copy: boolean }) => Promise<SwitchResult>
   pgSwitchToSqlite: () => Promise<SwitchResult>
+  // T15: pg settings UI status read — the active backend + whether this platform has a writable
+  // keychain, so the settings UI can render its badge + fallback-storage warning without the
+  // renderer itself knowing anything about backendConfig.json or keychain plumbing.
+  pgGetStatus: () => Promise<PgStatus>
   /** electron's app.relaunch() / app.exit(), called (in that order) after a successful backend
    *  switch — kept as two separate functions (rather than one combined "restart" fn) so a test can
    *  assert BOTH were actually invoked (plan-advisor H2), not just that "something" ran. */
@@ -207,6 +211,12 @@ export async function handlePgSaveSwitch(deps: IpcDeps, payload: unknown): Promi
   return { ok: true }
 }
 
+// T15 — pg settings UI status read: a thin pass-through, kept as its own handler (rather than
+// inlined into registerIpcHandlers) so it is unit-testable the same way as every other handler here.
+export async function handlePgGetStatus(deps: IpcDeps): Promise<PgStatus> {
+  return deps.pgGetStatus()
+}
+
 export function registerIpcHandlers(deps: IpcDeps): void {
   ipcMain.handle(IPC.appGetVersion, () => handleGetVersion(deps.meta))
   ipcMain.handle(IPC.jobsList, () => handleJobsList(deps))
@@ -230,4 +240,5 @@ export function registerIpcHandlers(deps: IpcDeps): void {
   ipcMain.handle(IPC.jobsManagedCount, () => handleJobsManagedCount(deps))
   ipcMain.handle(IPC.pgTestConnection, (_e, p) => handlePgTestConnection(deps, p))
   ipcMain.handle(IPC.pgSaveSwitch, (_e, p) => handlePgSaveSwitch(deps, p))
+  ipcMain.handle(IPC.pgGetStatus, () => handlePgGetStatus(deps))
 }

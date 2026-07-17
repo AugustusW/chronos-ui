@@ -15,7 +15,7 @@ import { makeCrontabExec, makePowerShellExec, type ExecFn } from './scheduler'
 import { createJobsService } from './services/jobs.service'
 import { createNotifyService } from './services/notify.service'
 import { goSecretDir } from './services/notify-secret'
-import { type ExecFn as KeychainExecFn } from './services/notify-keychain'
+import { keychainWriteSupported, type ExecFn as KeychainExecFn } from './services/notify-keychain'
 import { createLaunchdFlush, type FlushScheduler } from './services/notify-flush-launchd'
 import { runNow, runNowStreaming as runStreamingImpl, type SpawnLike } from './runner/manual-run'
 import { makeRunEmitter, type WebContentsLike } from './runner/run-emitter'
@@ -24,7 +24,7 @@ import { pgSecretRead } from './services/pg-secret'
 import { redactDsn } from './services/pg-dsn'
 import { testConnection, switchToPostgres, switchToSqlite, type SwitchResult, type TestConnectionResult } from './services/backend-switch'
 import type { IpcDeps } from './ipc'
-import type { RunEvent } from '../shared/ipc-contract'
+import type { RunEvent, PgStatus } from '../shared/ipc-contract'
 
 type App = AppPaths & { getName(): string; getVersion(): string; getAppPath(): string }
 
@@ -302,6 +302,11 @@ export async function buildMainDeps(app: App, opts: BuildOpts = {}): Promise<Bui
       sqlitePath: dbPath,
       rebake: { adapter, schedmgrPath }
     })
+  // T15: settings-UI status read — derived from the SAME `cfg`/`platform` this boot already
+  // computed above (not a fresh readBackendConfig() call), so it always reflects the backend THIS
+  // running process actually booted against.
+  const pgGetStatus = (): Promise<PgStatus> =>
+    Promise.resolve({ activeBackend: cfg.backend, keychainAvailable: keychainWriteSupported(platform) })
 
   const deps: IpcDeps = {
     meta: { name: app.getName(), version: app.getVersion() },
@@ -315,6 +320,7 @@ export async function buildMainDeps(app: App, opts: BuildOpts = {}): Promise<Bui
     pgTestConnection,
     pgSwitchToPostgres,
     pgSwitchToSqlite,
+    pgGetStatus,
     relaunchApp: opts.relaunchApp ?? (() => {}),
     exitApp: opts.exitApp ?? (() => {})
   }

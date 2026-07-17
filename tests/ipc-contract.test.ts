@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, it, expect, expectTypeOf } from 'vitest'
 import { IPC } from '../src/shared/ipc-contract'
-import type { JobListItem, ReconcileResult, CreateJobInput, RunNowResult, RunEvent } from '../src/shared/ipc-contract'
+import type { JobListItem, ReconcileResult, CreateJobInput, RunNowResult, RunEvent, PgStatus } from '../src/shared/ipc-contract'
 
 describe('IPC contract', () => {
   it('declares every Plan 5 channel with a stable string name', () => {
@@ -45,5 +45,15 @@ describe('Bolt 3 pg settings IPC channels (T13)', () => {
   it('declares the pg test-connection and save-switch channels', () => {
     expect(IPC.pgTestConnection).toBe('pg:testConnection')
     expect(IPC.pgSaveSwitch).toBe('pg:saveSwitch')
+  })
+})
+
+describe('Bolt 4 pg status IPC channel (T15)', () => {
+  it('declares the pg get-status channel', () => {
+    expect(IPC.pgGetStatus).toBe('pg:getStatus')
+  })
+  it('PgStatus carries the active backend + keychain availability', () => {
+    const s: PgStatus = { activeBackend: 'postgres', keychainAvailable: false }
+    expect(s.activeBackend).toBe('postgres')
   })
 })

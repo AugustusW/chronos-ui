@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import {
   handleGetVersion, handleJobsCreate, handleJobsUpdate, handleJobsAdopt, handleJobsRunNowStreaming, handleJobsRunBatchCancel, handleRunsRecent, handleNotifySave,
-  handlePgTestConnection, handlePgSaveSwitch,
+  handlePgTestConnection, handlePgSaveSwitch, handlePgGetStatus,
   MAX_BATCH_ADOPT, MAX_RUN_LIST_LIMIT, type IpcDeps
 } from '../src/main/ipc'
 import { buildDsn, type PgDsnParts } from '../src/main/services/pg-dsn'
@@ -30,6 +30,7 @@ const deps = (over: Partial<IpcDeps> = {}): IpcDeps => ({
   pgTestConnection: async () => ({ ok: true, version: 'PostgreSQL 16.4', ms: 1 }),
   pgSwitchToPostgres: async () => ({ ok: true, needRelaunch: true }),
   pgSwitchToSqlite: async () => ({ ok: true, needRelaunch: true }),
+  pgGetStatus: async () => ({ activeBackend: 'sqlite', keychainAvailable: true }),
   relaunchApp: () => {},
   exitApp: () => {},
   ...over
@@ -296,5 +297,13 @@ describe('handlePgSaveSwitch — relaunch/exit after a successful switch (plan-a
     const r = await handlePgSaveSwitch(d, { fields: { ...validPgFields, host: '' }, copyData: false, targetBackend: 'postgres' })
     expect(r.ok).toBe(false)
     expect(calls).toEqual([])
+  })
+})
+
+describe('handlePgGetStatus (T15)', () => {
+  it('delegates straight to deps.pgGetStatus', async () => {
+    const d = deps({ pgGetStatus: async () => ({ activeBackend: 'postgres', keychainAvailable: false }) })
+    const r = await handlePgGetStatus(d)
+    expect(r).toEqual({ activeBackend: 'postgres', keychainAvailable: false })
   })
 })

@@ -233,6 +233,39 @@ describe('buildMainDeps postgres backend boot (T11)', () => {
 })
 
 // ---------------------------------------------------------------------------------------------
+// T15 — pgGetStatus wiring: the settings-UI status read (activeBackend + keychainAvailable) is
+// derived straight from the SAME `cfg`/`platform` buildMainDeps already computes for boot (no
+// separate re-read of chronos-config.json at call time — the settings UI reflects whatever backend
+// THIS running process booted against, matching the "restart to apply" model the save/switch flow
+// already uses elsewhere in this bolt).
+// ---------------------------------------------------------------------------------------------
+describe('buildMainDeps pgGetStatus wiring (T15)', () => {
+  it('reports the sqlite default + keychain availability for a keychain-capable platform', async () => {
+    const built = await buildMainDeps(fakeApp, { exec, platform: 'darwin', appRoot: APP_ROOT, resourcesPath: '/x', dbPath: ':memory:' })
+    await expect(built.deps.pgGetStatus()).resolves.toEqual({ activeBackend: 'sqlite', keychainAvailable: true })
+    await built.handle.close()
+  })
+
+  it('reports postgres as the active backend once the config says so', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'chronos-boot-t15-'))
+    writeFileSync(join(dir, 'chronos-config.json'), JSON.stringify({ backend: 'postgres', pgService: 'svc-status' }))
+    const pgApp = { ...fakeApp, getPath: () => dir }
+    const pgSecretRead = vi.fn(async () => 'postgresql://u:p@h/db')
+    const openAndMigrate = vi.fn(async () => fakePgHandle())
+    const built = await buildMainDeps(pgApp, { exec, platform: 'darwin', appRoot: APP_ROOT, resourcesPath: '/x', pgSecretRead, openAndMigrate })
+    await expect(built.deps.pgGetStatus()).resolves.toEqual({ activeBackend: 'postgres', keychainAvailable: true })
+    await built.handle.close()
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('reports keychainAvailable=false on a platform with no keychain write support (win32)', async () => {
+    const built = await buildMainDeps(fakeApp, { exec, platform: 'win32', appRoot: APP_ROOT, resourcesPath: '/x', dbPath: ':memory:' })
+    await expect(built.deps.pgGetStatus()).resolves.toEqual({ activeBackend: 'sqlite', keychainAvailable: false })
+    await built.handle.close()
+  })
+})
+
+// ---------------------------------------------------------------------------------------------
 // T12 — index.ts's catch handler for a BootPgUnreachableError: a blocking "Database unreachable"
 // dialog offering a session-only sqlite fallback or quitting outright. handleBootPgUnreachable is
 // the pure, Electron-free decision function index.ts wires dialog.showMessageBox/app.quit into.

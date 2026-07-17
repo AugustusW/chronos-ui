@@ -27,7 +27,8 @@ export const IPC = {
   notifyTest: 'notify:test',
   jobsManagedCount: 'jobs:managedCount',
   pgTestConnection: 'pg:testConnection',
-  pgSaveSwitch: 'pg:saveSwitch'
+  pgSaveSwitch: 'pg:saveSwitch',
+  pgGetStatus: 'pg:getStatus'
 } as const
 
 export interface AppVersion {
@@ -103,6 +104,14 @@ export interface PgSaveSwitchInput {
 }
 
 export type PgSaveSwitchResult = { ok: true } | { ok: false; error: string }
+
+/** Renderer → main pg-settings-UI status read (Bolt 4, T15) — the currently active backend + whether
+ *  this platform has a writable OS keychain (drives the settings UI's fallback-storage warning, same
+ *  signal notify.service.ts's tokenStorage already surfaces for the Telegram token). */
+export interface PgStatus {
+  activeBackend: 'sqlite' | 'postgres'
+  keychainAvailable: boolean
+}
 
 export type { Job, RunLog, ParsedJob, BatchWriteResult, WriteResult }
 export type { NotifySettingsDTO, NotifySaveInput, SaveResult } from '../main/services/notify.service'
