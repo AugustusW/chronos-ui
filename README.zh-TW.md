@@ -55,7 +55,7 @@ vim、重來一遍                     翻執行歷史
 - ✓ 隨手手動執行任何 job
 - ✓ 執行歷史：側錄 stdout/stderr + 耗時
 - ✓ 排程 job 失敗 / 逾時時發 Telegram 通知（即時，或彙整成 digest）
-- ✓ 預設 SQLite，可選 PostgreSQL
+- ✓ 預設 SQLite，可選 PostgreSQL——隨時可在「設定」切換，既有資料會自動幫你搬移
 - ✓ 跨平台（macOS、Windows；Linux 走 cron）
 
 ## 截圖

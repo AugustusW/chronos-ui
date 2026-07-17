@@ -58,7 +58,7 @@ vim, repeat                       read the run history
 - ✓ Run any job on demand
 - ✓ Run history with captured stdout/stderr and durations
 - ✓ Telegram notifications when a scheduled job fails or times out (immediate, or batched into a digest)
-- ✓ SQLite by default, PostgreSQL optional
+- ✓ SQLite by default, PostgreSQL optional — switch anytime from Settings, with existing data migrated for you
 - ✓ Cross-platform (macOS, Windows; Linux via cron)
 
 ## Screenshot
