@@ -70,6 +70,16 @@ ChronosUI 讀取你的原生排程器、用乾淨的 GUI 呈現。要記錄「�
 用一個隨附的小程式（`schedmgr`）把指令包起來——完全透明（相同工作目錄、環境變數、exit code），且一鍵可還原。
 實際的 `crontab` 改寫方式記載在 [docs/crontab.md](docs/crontab.md)。
 
+### 使用 PostgreSQL
+
+不需要自己設計或建立任何資料表——ChronosUI 內建版本化 migration，會自動建表、自動升級 schema。只要準備三樣東西，然後在「設定 → Database」填連線表單：
+
+1. 一個**空的** database（若指到已有資料的 database，切換會直接拒絕，避免誤蓋）。
+2. 一個在該 database 有建表權限的帳號（例如 database owner）。
+3. 連線資訊（host / port / database / 帳號 / 密碼）。
+
+連線字串存放在 OS keychain（macOS）或僅限本人帳號可讀的檔案，不會出現在 cron 行或設定檔中。勾選「Copy existing SQLite data」會把 jobs、執行歷史與通知設定在單一交易內搬移；原本的 `chronos.db` 原地保留當備份，之後隨時可從同一個面板切回。
+
 ## macOS 權限
 
 ### macOS 為什麼會要求「管理電腦」權限？
