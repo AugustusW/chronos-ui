@@ -148,7 +148,7 @@
     "npmRebuild": false
   },
   "overrides": {
-    "node-gyp": "^10.2.0"
+    "node-gyp": "^11.2.0"
   },
   "repository": {
     "type": "git",
