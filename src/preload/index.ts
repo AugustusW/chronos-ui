@@ -3,7 +3,7 @@ import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import { IPC } from '../shared/ipc-contract'
 import type {
   AppVersion, ReconcileResult, CreateJobInput, UpdateJobChanges, AdoptItem, RunNowResult, Job, RunLog, WriteResult, BatchWriteResult, RunEvent,
-  NotifySettingsDTO, NotifySaveInput, SaveResult
+  NotifySettingsDTO, NotifySaveInput, SaveResult, PgDsnParts, PgSaveSwitchInput, PgSaveSwitchResult, TestConnectionResult
 } from '../shared/ipc-contract'
 
 const api = {
@@ -32,7 +32,9 @@ const api = {
   getNotifySettings: (): Promise<NotifySettingsDTO> => ipcRenderer.invoke(IPC.notifyGet),
   saveNotifySettings: (input: NotifySaveInput): Promise<SaveResult> => ipcRenderer.invoke(IPC.notifySave, input),
   testNotify: (): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke(IPC.notifyTest),
-  managedCount: (): Promise<number> => ipcRenderer.invoke(IPC.jobsManagedCount)
+  managedCount: (): Promise<number> => ipcRenderer.invoke(IPC.jobsManagedCount),
+  pgTestConnection: (fields: PgDsnParts): Promise<TestConnectionResult> => ipcRenderer.invoke(IPC.pgTestConnection, fields),
+  pgSaveSwitch: (input: PgSaveSwitchInput): Promise<PgSaveSwitchResult> => ipcRenderer.invoke(IPC.pgSaveSwitch, input)
 }
 
 contextBridge.exposeInMainWorld('chronos', api)

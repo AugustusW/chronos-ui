@@ -40,3 +40,10 @@ describe('Plan 6 FU5 IPC additions', () => {
     expect(IPC.runsRecent).toBe('runs:recent')
   })
 })
+
+describe('Bolt 3 pg settings IPC channels (T13)', () => {
+  it('declares the pg test-connection and save-switch channels', () => {
+    expect(IPC.pgTestConnection).toBe('pg:testConnection')
+    expect(IPC.pgSaveSwitch).toBe('pg:saveSwitch')
+  })
+})
