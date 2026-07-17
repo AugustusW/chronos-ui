@@ -48,4 +48,17 @@ describe('preload chronos api', () => {
     expect(typeof api.platform).toBe('string')
     expect(api.platform).toBe(process.platform)
   })
+
+  it('exposes the pg settings methods (Bolt 3, T13)', async () => {
+    await import('../src/preload/index')
+    const api = exposed.chronos as Record<string, unknown>
+    expect(typeof api.pgTestConnection).toBe('function')
+    expect(typeof api.pgSaveSwitch).toBe('function')
+  })
+
+  it('exposes the pg status method (Bolt 4, T15)', async () => {
+    await import('../src/preload/index')
+    const api = exposed.chronos as Record<string, unknown>
+    expect(typeof api.pgGetStatus).toBe('function')
+  })
 })

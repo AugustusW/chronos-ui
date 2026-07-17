@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { Job, RunLog } from '../main/db/schema'
 import type { ParsedJob, BatchWriteResult, WriteResult } from '../main/scheduler/types'
+import type { PgDsnParts } from '../main/services/pg-dsn'
+import type { TestConnectionResult } from '../main/services/backend-switch'
 
 export const IPC = {
   appGetVersion: 'app:getVersion',
@@ -23,7 +25,10 @@ export const IPC = {
   notifyGet: 'notify:get',
   notifySave: 'notify:save',
   notifyTest: 'notify:test',
-  jobsManagedCount: 'jobs:managedCount'
+  jobsManagedCount: 'jobs:managedCount',
+  pgTestConnection: 'pg:testConnection',
+  pgSaveSwitch: 'pg:saveSwitch',
+  pgGetStatus: 'pg:getStatus'
 } as const
 
 export interface AppVersion {
@@ -89,5 +94,25 @@ export type RunEvent =
   | { kind: 'finished'; runId: number; result: 'success' | 'failure'; exitCode: number | null; endedAt: number }
   | { kind: 'jobsChanged' }
 
+/** Renderer → main pg-settings-UI save/switch payload (Bolt 3, T13). `fields` carries the connection
+ *  form's current values regardless of `targetBackend` — the handler only validates/uses them when
+ *  targetBackend='postgres' (a switch back to sqlite needs no connection details). */
+export interface PgSaveSwitchInput {
+  fields: PgDsnParts
+  copyData: boolean
+  targetBackend: 'postgres' | 'sqlite'
+}
+
+export type PgSaveSwitchResult = { ok: true } | { ok: false; error: string }
+
+/** Renderer → main pg-settings-UI status read (Bolt 4, T15) — the currently active backend + whether
+ *  this platform has a writable OS keychain (drives the settings UI's fallback-storage warning, same
+ *  signal notify.service.ts's tokenStorage already surfaces for the Telegram token). */
+export interface PgStatus {
+  activeBackend: 'sqlite' | 'postgres'
+  keychainAvailable: boolean
+}
+
 export type { Job, RunLog, ParsedJob, BatchWriteResult, WriteResult }
 export type { NotifySettingsDTO, NotifySaveInput, SaveResult } from '../main/services/notify.service'
+export type { PgDsnParts, TestConnectionResult }

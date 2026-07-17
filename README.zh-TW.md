@@ -55,7 +55,7 @@ vim、重來一遍                     翻執行歷史
 - ✓ 隨手手動執行任何 job
 - ✓ 執行歷史：側錄 stdout/stderr + 耗時
 - ✓ 排程 job 失敗 / 逾時時發 Telegram 通知（即時，或彙整成 digest）
-- ✓ 預設 SQLite，可選 PostgreSQL
+- ✓ 預設 SQLite，可選 PostgreSQL——隨時可在「設定」切換，既有資料會自動幫你搬移
 - ✓ 跨平台（macOS、Windows；Linux 走 cron）
 
 ## 截圖
@@ -69,6 +69,16 @@ vim、重來一遍                     翻執行歷史
 ChronosUI 讀取你的原生排程器、用乾淨的 GUI 呈現。要記錄「排程自動跑」的輸出，它可以「接管」一個 job——
 用一個隨附的小程式（`schedmgr`）把指令包起來——完全透明（相同工作目錄、環境變數、exit code），且一鍵可還原。
 實際的 `crontab` 改寫方式記載在 [docs/crontab.md](docs/crontab.md)。
+
+### 使用 PostgreSQL
+
+不需要自己設計或建立任何資料表——ChronosUI 內建版本化 migration，會自動建表、自動升級 schema。只要準備三樣東西，然後在「設定 → Database」填連線表單：
+
+1. 一個**空的** database（若指到已有資料的 database，切換會直接拒絕，避免誤蓋）。
+2. 一個在該 database 有建表權限的帳號（例如 database owner）。
+3. 連線資訊（host / port / database / 帳號 / 密碼）。
+
+連線字串存放在 OS keychain（macOS）或僅限本人帳號可讀的檔案，不會出現在 cron 行或設定檔中。勾選「Copy existing SQLite data」會把 jobs、執行歷史與通知設定在單一交易內搬移；原本的 `chronos.db` 原地保留當備份，之後隨時可從同一個面板切回。
 
 ## macOS 權限
 

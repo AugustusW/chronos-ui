@@ -2,11 +2,13 @@
 import { ipcMain } from 'electron'
 import { IPC, type AppVersion } from '../shared/ipc-contract'
 import { isNotifyTokenFormat, isChatIdFormat } from '../shared/notify-validation'
-import type { CreateJobInput, UpdateJobChanges, AdoptItem, ReconcileResult, RunNowResult } from '../shared/ipc-contract'
+import type { CreateJobInput, UpdateJobChanges, AdoptItem, ReconcileResult, RunNowResult, PgDsnParts, PgSaveSwitchInput, PgSaveSwitchResult, PgStatus } from '../shared/ipc-contract'
 import type { JobsService } from './services/jobs.service'
 import type { NotifyService, NotifySaveInput } from './services/notify.service'
 import type { RunLog } from './db/schema'
 import type { WriteResult, BatchWriteResult } from './scheduler/types'
+import { buildDsn } from './services/pg-dsn'
+import type { TestConnectionResult, SwitchResult } from './services/backend-switch'
 
 export const MAX_BATCH_ADOPT = 100
 
@@ -19,6 +21,26 @@ export interface IpcDeps {
   recentRuns: (limit?: number) => Promise<RunLog[]>
   runNowStreaming: (id: number) => Promise<void>
   cancelBatch: () => void
+  // T13: pg settings UI — wired by bootstrap.ts to the real backend-switch.ts functions.
+  pgTestConnection: (dsn: string) => Promise<TestConnectionResult>
+  pgSwitchToPostgres: (config: { dsn: string; copy: boolean }) => Promise<SwitchResult>
+  pgSwitchToSqlite: () => Promise<SwitchResult>
+  // T15: pg settings UI status read — the active backend + whether this platform has a writable
+  // keychain, so the settings UI can render its badge + fallback-storage warning without the
+  // renderer itself knowing anything about backendConfig.json or keychain plumbing.
+  pgGetStatus: () => Promise<PgStatus>
+  /** Drains a live postgres pool (db/lifecycle.ts's drainPgHandle), no-op for a sqlite handle —
+   *  MUST be awaited before relaunchApp()/exitApp() below (C2, code review). electron's app.exit()
+   *  (unlike app.quit()) never fires 'before-quit', which is the ONLY place index.ts's own
+   *  pgQuitDrain teardown is wired up — so without this explicit await, a switch-triggered exit
+   *  would skip pool draining entirely and could cut an in-flight write. */
+  drainDb: () => Promise<void>
+  /** electron's app.relaunch() / app.exit(), called (in that order, AFTER drainDb above) after a
+   *  successful backend switch — kept as two separate functions (rather than one combined "restart"
+   *  fn) so a test can assert BOTH were actually invoked (plan-advisor H2), not just that "something"
+   *  ran. */
+  relaunchApp: () => void
+  exitApp: () => void
 }
 
 export function handleGetVersion(meta: { name: string; version: string }): AppVersion {
@@ -151,6 +173,74 @@ export async function handleJobsManagedCount(deps: IpcDeps): Promise<number> {
   return deps.service.managedCount()
 }
 
+// ---------------------------------------------------------------------------------------------
+// T13 — pg settings UI: test-connection + save/switch. Password validation deliberately stays
+// format-only (never echoed back in any error string here — see the handlers below), and the raw
+// fields never leave this module except folded into a DSN string handed to backend-switch.ts.
+// ---------------------------------------------------------------------------------------------
+const PG_SSLMODES = new Set(['disable', 'allow', 'prefer', 'require', 'verify-ca', 'verify-full'])
+const isPort = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v) && v > 0 && v <= 65535
+function isPgFields(p: unknown): p is PgDsnParts {
+  if (!p || typeof p !== 'object') return false
+  const o = p as Record<string, unknown>
+  return (
+    isStr(o.host) && o.host.length > 0 &&
+    isPort(o.port) &&
+    isStr(o.database) && o.database.length > 0 &&
+    isStr(o.user) && o.user.length > 0 &&
+    isStr(o.password) &&
+    isStr(o.sslmode) && PG_SSLMODES.has(o.sslmode)
+  )
+}
+
+export async function handlePgTestConnection(deps: IpcDeps, payload: unknown): Promise<TestConnectionResult> {
+  if (!isPgFields(payload)) return { ok: false, error: 'invalid connection fields' }
+  return deps.pgTestConnection(buildDsn(payload))
+}
+
+export async function handlePgSaveSwitch(deps: IpcDeps, payload: unknown): Promise<PgSaveSwitchResult> {
+  const p = payload as Partial<PgSaveSwitchInput> | null | undefined
+  if (!p || typeof p !== 'object') return { ok: false, error: 'invalid payload' }
+  if (p.targetBackend !== 'postgres' && p.targetBackend !== 'sqlite') return { ok: false, error: 'invalid targetBackend' }
+
+  // I3 (code review): reject a switch to the backend that's already active. Without this guard, a
+  // resubmitted targetBackend equal to the currently-running backend would call pgSwitchToPostgres/
+  // pgSwitchToSqlite against a live `sqliteHandle` that is — despite the name — ALREADY a postgres
+  // handle once the process booted postgres, purely because the field happens to be present either
+  // way; it "works" only by accident of both dialects sharing a handle shape.
+  const { activeBackend } = await deps.pgGetStatus()
+  if (p.targetBackend === activeBackend) {
+    return { ok: false, error: activeBackend === 'postgres' ? 'Already using PostgreSQL backend' : 'Already using SQLite backend' }
+  }
+
+  if (p.targetBackend === 'sqlite') {
+    const res = await deps.pgSwitchToSqlite()
+    if (!res.ok) return { ok: false, error: res.error }
+    // C2: drain a live postgres pool BEFORE relaunch/exit — app.exit() never fires 'before-quit'
+    // (the only place index.ts's own pgQuitDrain teardown runs), so without this the pool would
+    // never be drained on this path.
+    await deps.drainDb()
+    deps.relaunchApp()
+    deps.exitApp()
+    return { ok: true }
+  }
+
+  if (!isPgFields(p.fields)) return { ok: false, error: 'invalid connection fields' }
+  if (typeof p.copyData !== 'boolean') return { ok: false, error: 'invalid copyData' }
+  const res = await deps.pgSwitchToPostgres({ dsn: buildDsn(p.fields), copy: p.copyData })
+  if (!res.ok) return { ok: false, error: res.error }
+  await deps.drainDb()
+  deps.relaunchApp()
+  deps.exitApp()
+  return { ok: true }
+}
+
+// T15 — pg settings UI status read: a thin pass-through, kept as its own handler (rather than
+// inlined into registerIpcHandlers) so it is unit-testable the same way as every other handler here.
+export async function handlePgGetStatus(deps: IpcDeps): Promise<PgStatus> {
+  return deps.pgGetStatus()
+}
+
 export function registerIpcHandlers(deps: IpcDeps): void {
   ipcMain.handle(IPC.appGetVersion, () => handleGetVersion(deps.meta))
   ipcMain.handle(IPC.jobsList, () => handleJobsList(deps))
@@ -172,4 +262,7 @@ export function registerIpcHandlers(deps: IpcDeps): void {
   ipcMain.handle(IPC.notifySave, (_e, p) => handleNotifySave(deps, p))
   ipcMain.handle(IPC.notifyTest, () => handleNotifyTest(deps))
   ipcMain.handle(IPC.jobsManagedCount, () => handleJobsManagedCount(deps))
+  ipcMain.handle(IPC.pgTestConnection, (_e, p) => handlePgTestConnection(deps, p))
+  ipcMain.handle(IPC.pgSaveSwitch, (_e, p) => handlePgSaveSwitch(deps, p))
+  ipcMain.handle(IPC.pgGetStatus, () => handlePgGetStatus(deps))
 }

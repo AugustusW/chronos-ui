@@ -4,7 +4,7 @@ import { writeFileSync, rmSync, mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, dirname } from 'node:path'
 import type { DatabaseHandle } from './db/client'
-import { openAndMigrate } from './db/lifecycle'
+import { openAndMigrate, drainPgHandle } from './db/lifecycle'
 import { createRepositories } from './db/repositories'
 import { readBackendConfig } from './db/backendConfig'
 import { schedmgrDbDescriptor } from './scheduler/descriptor'
@@ -15,14 +15,39 @@ import { makeCrontabExec, makePowerShellExec, type ExecFn } from './scheduler'
 import { createJobsService } from './services/jobs.service'
 import { createNotifyService } from './services/notify.service'
 import { goSecretDir } from './services/notify-secret'
+import { keychainWriteSupported, type ExecFn as KeychainExecFn } from './services/notify-keychain'
 import { createLaunchdFlush, type FlushScheduler } from './services/notify-flush-launchd'
 import { runNow, runNowStreaming as runStreamingImpl, type SpawnLike } from './runner/manual-run'
 import { makeRunEmitter, type WebContentsLike } from './runner/run-emitter'
 import { createBatchRunner } from './runner/batch-run'
+import { pgSecretRead } from './services/pg-secret'
+import { redactDsn } from './services/pg-dsn'
+import { testConnection, switchToPostgres, switchToSqlite, type SwitchResult, type TestConnectionResult } from './services/backend-switch'
 import type { IpcDeps } from './ipc'
-import type { RunEvent } from '../shared/ipc-contract'
+import type { RunEvent, PgStatus } from '../shared/ipc-contract'
 
 type App = AppPaths & { getName(): string; getVersion(): string; getAppPath(): string }
+
+/** Thrown by buildMainDeps (T11) when the persisted backend config says 'postgres' but the DSN
+ *  can't be resolved (missing pgService / no secret found) or the connection itself fails. NEVER
+ *  silently caught into a sqlite fallback inside buildMainDeps — index.ts (T12) catches this
+ *  specific type to show a blocking "Database unreachable" dialog instead of quietly booting
+ *  against the wrong (or no) database. */
+export class BootPgUnreachableError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'BootPgUnreachableError'
+  }
+}
+
+/** Same "the raw DSN might appear anywhere in a driver error, not just as a prefix" concern
+ *  backend-switch.ts's private redactError guards against (T5) — reimplemented here (rather than
+ *  imported) since exporting that function would mean growing backend-switch.ts's public surface
+ *  for a single external caller; this is a 2-line pure string helper. */
+function redactBootError(err: unknown, dsn: string): string {
+  const message = err instanceof Error ? err.message : String(err)
+  return message.includes(dsn) ? message.split(dsn).join(redactDsn(dsn)) : redactDsn(message)
+}
 
 export interface BuildOpts {
   exec?: ExecFn
@@ -32,6 +57,23 @@ export interface BuildOpts {
   dbPath?: string // tests pass ':memory:'
   getWebContents?: () => WebContentsLike | undefined
   spawn?: SpawnLike // test seam: overrides the runNow child spawn so argv can be asserted
+  /** T11 test seam: overrides the keychain exec used for the pg-DSN secret read at boot (defaults
+   *  to a real `security`/`secret-tool` spawn, same as the notify-token keychain plumbing). */
+  execKeychain?: KeychainExecFn
+  /** T11 test seam: overrides the pg DSN secret lookup (defaults to the real pgSecretRead). */
+  pgSecretRead?: typeof pgSecretRead
+  /** T11 test seam: overrides the DB open+migrate step for BOTH dialects (defaults to the real
+   *  openAndMigrate) — lets a test fake a postgres open (success or failure) with no real server. */
+  openAndMigrate?: typeof openAndMigrate
+  /** T12: force the sqlite boot path even when the persisted config says 'postgres' — the
+   *  session-only fallback offered by index.ts's "Database unreachable" dialog. Never writes
+   *  chronos-config.json (a permanent switch back to sqlite is switchToSqlite, T9/T13). */
+  forceSqlite?: boolean
+  /** T13: wraps electron's app.relaunch()/app.exit(), called by the pg-settings IPC handler after a
+   *  successful backend switch. Defaults to a no-op so non-Electron tests/callers don't need to
+   *  supply them. */
+  relaunchApp?: () => void
+  exitApp?: () => void
 }
 
 export interface BuiltDeps {
@@ -46,6 +88,50 @@ export interface BuiltDeps {
   pruneRunLogs: (cutoff: Date) => Promise<number>
 }
 
+/** T12: the two buttons offered by the "Database unreachable" dialog, in showMessageBox order
+ *  (index 0 = default = the non-destructive choice; index 1 = cancelId = Quit). */
+export const BOOT_PG_UNREACHABLE_BUTTONS = ['Start with SQLite (this session)', 'Quit'] as const
+
+export interface BootErrorUiDeps {
+  /** electron's dialog.showMessageBox, narrowed to the one overload this needs. */
+  showMessageBox(opts: {
+    type: 'error'
+    message: string
+    detail: string
+    buttons: string[]
+    defaultId: number
+    cancelId: number
+  }): Promise<{ response: number }>
+  /** electron's app.quit — fire-and-forget (Electron itself drives the teardown from here). */
+  quit(): void
+  /** Rebuilds BuiltDeps forced onto sqlite for THIS session only (buildMainDeps's forceSqlite opt) —
+   *  never touches chronos-config.json; a permanent switch back to sqlite is the settings UI's own
+   *  switchToSqlite (T9/T13). */
+  buildSqliteFallback(): Promise<BuiltDeps>
+}
+
+/** T12: index.ts's catch handler for a BootPgUnreachableError out of buildMainDeps. Blocks on a
+ *  native dialog rather than silently picking either outcome — the whole point of
+ *  BootPgUnreachableError is that the app must never run against the wrong (or a silently
+ *  downgraded) database without the user explicitly choosing that. Resolves the fallback BuiltDeps
+ *  to continue booting with, or null when the user chose to quit (deps.quit() has already fired —
+ *  the caller's whenReady chain should stop wiring anything further, not treat null as an error). */
+export async function handleBootPgUnreachable(err: BootPgUnreachableError, deps: BootErrorUiDeps): Promise<BuiltDeps | null> {
+  const { response } = await deps.showMessageBox({
+    type: 'error',
+    message: 'Database unreachable',
+    detail: err.message,
+    buttons: [...BOOT_PG_UNREACHABLE_BUTTONS],
+    defaultId: 0,
+    cancelId: 1
+  })
+  if (response !== 0) {
+    deps.quit()
+    return null
+  }
+  return deps.buildSqliteFallback()
+}
+
 /** Assemble everything the main process needs. Injectable so it runs under vitest without Electron. */
 export async function buildMainDeps(app: App, opts: BuildOpts = {}): Promise<BuiltDeps> {
   const platform = opts.platform ?? process.platform
@@ -53,21 +139,65 @@ export async function buildMainDeps(app: App, opts: BuildOpts = {}): Promise<Bui
   const resourcesPath = opts.resourcesPath ?? process.resourcesPath ?? ''
   const dbPath = opts.dbPath ?? resolveDbPath(app)
   const migrationsPaths = resolveMigrationsPaths(app, { appRoot, resourcesPath })
+  const cfg = readBackendConfig(app)
 
-  // Boot is always SQLite in Plan 1 (the user-facing backend switch arrives in Plan 3). For a
-  // :memory: test DB, migrations live in source (dev/test may not have run electron-vite build yet).
-  const handle =
-    dbPath === ':memory:'
-      ? await openAndMigrate(
+  // Keychain exec shared by (a) the T11 pg-DSN secret read at boot below and (b) the notify
+  // service's own token store/read further down — both go through the same darwin `security` /
+  // linux `secret-tool` plumbing (notify-keychain.ts), just against different keychain `service`
+  // names, so a single spawn-backed implementation (or a single test fake) covers both.
+  const execKeychain: KeychainExecFn = opts.execKeychain ?? ((cmd, a, stdin) => new Promise((resolve) => {
+    try {
+      const child = spawn(cmd, a, { stdio: ['pipe', 'pipe', 'ignore'] })
+      let out = ''
+      child.stdout?.on('data', (d) => { out += d.toString() })
+      child.on('close', (code) => resolve({ code: code ?? 1, stdout: out }))
+      child.on('error', () => resolve({ code: 1, stdout: '' }))
+      if (stdin !== undefined) child.stdin?.write(stdin)
+      child.stdin?.end()
+    } catch { resolve({ code: 1, stdout: '' }) }
+  }))
+  const secretConfigDir = goSecretDir(platform, process.env, homedir())
+
+  const _pgSecretRead = opts.pgSecretRead ?? pgSecretRead
+  const _openAndMigrate = opts.openAndMigrate ?? openAndMigrate
+
+  // Boot backend (T11): sqlite is the always-available default (also covers a missing/corrupt
+  // config file — readBackendConfig's own fallback) or an explicit session-only forceSqlite (T12's
+  // "Database unreachable" fallback); postgres opens straight from the DSN stored at
+  // switchToPostgres-time (T8) under `cfg.pgService`. A postgres connection failure here is NEVER
+  // silently downgraded to sqlite — it throws a typed BootPgUnreachableError so index.ts can put up
+  // a blocking dialog (T12) instead of quietly running against the wrong (or no) DB.
+  const handle: DatabaseHandle = await (async () => {
+    if (!opts.forceSqlite && cfg.backend === 'postgres') {
+      if (!cfg.pgService) {
+        throw new BootPgUnreachableError('Postgres backend is selected but no DSN service is configured — re-run the backend switch from Settings.')
+      }
+      const dsn = await _pgSecretRead(cfg.pgService, { exec: execKeychain, platform, configDir: secretConfigDir })
+      if (!dsn) {
+        throw new BootPgUnreachableError(`No DSN found in the keychain (or its fallback file) for service "${cfg.pgService}".`)
+      }
+      try {
+        return await _openAndMigrate({ dialect: 'postgres', dsn }, migrationsPaths)
+      } catch (err) {
+        throw new BootPgUnreachableError(redactBootError(err, dsn))
+      }
+    }
+    // sqlite (default, incl. a missing/corrupt config file, or an explicit forceSqlite fallback).
+    // For a :memory: test DB, migrations live in source (dev/test may not have run electron-vite
+    // build yet).
+    return dbPath === ':memory:'
+      ? _openAndMigrate(
           { dialect: 'sqlite', path: ':memory:' },
           {
             sqlite: join(appRoot, 'src/main/db/migrations'),
             pg: join(appRoot, 'src/main/db/migrations.pg')
           }
         )
-      : await openAndMigrate({ dialect: 'sqlite', path: dbPath }, migrationsPaths)
+      : _openAndMigrate({ dialect: 'sqlite', path: dbPath }, migrationsPaths)
+  })()
 
-  // Dialect-appropriate repositories (sqlite at boot in Plan 1; pg becomes selectable in Plan 3).
+  // Dialect-appropriate repositories (sqlite by default; postgres once the backend switch, T8, has
+  // been completed and boot picks it up per the branch above).
   const repos = createRepositories(handle)
 
   // The schedmgr `--db` descriptor is DISTINCT from the GUI's own db path: postgres →
@@ -76,7 +206,7 @@ export async function buildMainDeps(app: App, opts: BuildOpts = {}): Promise<Bui
   // It is substituted for `dbPath` at every site that bakes it into a schedmgr invocation: the
   // adapter (adopt/create/reconcile cron lines), the service (the unadopt compensating re-adopt),
   // and both runners — NOT the returned dbPath (the GUI file watcher needs the real path).
-  const schedmgrDescriptor = schedmgrDbDescriptor(readBackendConfig(app), dbPath)
+  const schedmgrDescriptor = schedmgrDbDescriptor(cfg, dbPath)
 
   const exec = opts.exec ?? (platform === 'win32' ? makePowerShellExec() : makeCrontabExec())
   const schedmgrPath = resolveSchedmgrPath({ isPackaged: app.isPackaged, platform, appRoot, resourcesPath })
@@ -116,23 +246,14 @@ export async function buildMainDeps(app: App, opts: BuildOpts = {}): Promise<Bui
 
   const notify = createNotifyService({
     repos, flushScheduler, schedmgrPath, schedmgrDescriptor,
-    secretDir: goSecretDir(platform, process.env, homedir()),
+    secretDir: secretConfigDir,
     fetchFn: fetch,
     platform,
     // Runs a keychain CLI (security / secret-tool) capturing stdout + exit code. The token is fed on
     // stdin for secret-tool (Linux), so on Linux it never appears in argv; on macOS `security` takes
-    // it as an argument (brief `ps` exposure — see notify-keychain.ts writeCommand).
-    execKeychain: (cmd, a, stdin) => new Promise((resolve) => {
-      try {
-        const child = spawn(cmd, a, { stdio: ['pipe', 'pipe', 'ignore'] })
-        let out = ''
-        child.stdout?.on('data', (d) => { out += d.toString() })
-        child.on('close', (code) => resolve({ code: code ?? 1, stdout: out }))
-        child.on('error', () => resolve({ code: 1, stdout: '' }))
-        if (stdin !== undefined) child.stdin?.write(stdin)
-        child.stdin?.end()
-      } catch { resolve({ code: 1, stdout: '' }) }
-    }),
+    // it as an argument (brief `ps` exposure — see notify-keychain.ts writeCommand). Shared with the
+    // T11 pg-DSN secret read above (execKeychain, hoisted to the top of this function).
+    execKeychain,
     spawnFlush: (p, a) => new Promise<void>((resolve) => {
       const TIMEOUT_MS = 15_000
       let settled = false
@@ -159,6 +280,39 @@ export async function buildMainDeps(app: App, opts: BuildOpts = {}): Promise<Bui
 
   const batch = createBatchRunner(runNowStreaming)
 
+  // T13: pg settings-UI IPC wiring. testConnection is stateless (no deps needed — it opens its own
+  // short-lived client). switchToPostgres/switchToSqlite reuse the SAME ingredients already
+  // assembled above (the currently-open `handle` as the switch's data source, the keychain exec +
+  // configDir for the new DSN's secret, the native-scheduler `adapter` for rebakeDescriptors) rather
+  // than re-deriving any of them.
+  const pgTestConnection = (dsn: string): Promise<TestConnectionResult> => testConnection(dsn)
+  const pgSwitchToPostgres = (config: { dsn: string; copy: boolean }): Promise<SwitchResult> =>
+    switchToPostgres(config, {
+      sqliteHandle: handle,
+      migrationsPgPath: migrationsPaths.pg,
+      secretDeps: { exec: execKeychain, platform, configDir: secretConfigDir },
+      configApp: app,
+      sqlitePath: dbPath,
+      rebake: { adapter, schedmgrPath }
+    })
+  const pgSwitchToSqlite = (): Promise<SwitchResult> =>
+    switchToSqlite({
+      sqliteHandle: handle,
+      configApp: app,
+      sqlitePath: dbPath,
+      rebake: { adapter, schedmgrPath }
+    })
+  // T15: settings-UI status read — derived from the SAME `cfg`/`platform` this boot already
+  // computed above (not a fresh readBackendConfig() call), so it always reflects the backend THIS
+  // running process actually booted against.
+  const pgGetStatus = (): Promise<PgStatus> =>
+    Promise.resolve({ activeBackend: cfg.backend, keychainAvailable: keychainWriteSupported(platform) })
+
+  // C2: drains the SAME `handle` this boot opened above — a no-op for a sqlite handle (its close()
+  // is synchronous internally, so nothing needs awaiting before ipc.ts's handlePgSaveSwitch calls
+  // relaunchApp()/exitApp()), a real drainPgHandle (db/lifecycle.ts) for a postgres handle.
+  const drainDb = (): Promise<void> => (handle.dialect === 'postgres' ? drainPgHandle(handle) : Promise.resolve())
+
   const deps: IpcDeps = {
     meta: { name: app.getName(), version: app.getVersion() },
     service,
@@ -167,7 +321,14 @@ export async function buildMainDeps(app: App, opts: BuildOpts = {}): Promise<Bui
     listRunsForJob: (jobId, limit) => repos.runLogs.listForJob(jobId, limit),
     recentRuns: (limit) => repos.runLogs.listRecent(limit),
     runNowStreaming,
-    cancelBatch: () => batch.cancel()
+    cancelBatch: () => batch.cancel(),
+    pgTestConnection,
+    pgSwitchToPostgres,
+    pgSwitchToSqlite,
+    pgGetStatus,
+    drainDb,
+    relaunchApp: opts.relaunchApp ?? (() => {}),
+    exitApp: opts.exitApp ?? (() => {})
   }
   const pruneRunLogs = (cutoff: Date): Promise<number> => repos.runLogs.pruneOlderThan(cutoff)
 

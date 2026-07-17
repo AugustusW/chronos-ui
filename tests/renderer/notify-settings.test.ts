@@ -3,12 +3,14 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { _resetNotifySingleton } from '../../src/renderer/src/stores/notify.store'
+import { _resetDbSettingsSingleton } from '../../src/renderer/src/stores/dbsettings.store'
 import SettingsView from '../../src/renderer/src/views/SettingsView.vue'
 
 type GlobalWithWindow = typeof globalThis & { window: Record<string, unknown> }
 
 beforeEach(() => {
   _resetNotifySingleton()
+  _resetDbSettingsSingleton()
   // Augment the existing jsdom window so DOM event constructors remain intact
   const g = globalThis as GlobalWithWindow
   g.window ??= {} as Record<string, unknown>
@@ -16,7 +18,11 @@ beforeEach(() => {
     platform: 'darwin',
     getNotifySettings: vi.fn(async () => ({ enabled: false, chatId: null, windowMin: 0, tokenSet: false })),
     saveNotifySettings: vi.fn(async () => ({ ok: true, settings: { enabled: true, chatId: '42', windowMin: 0, tokenSet: true } })),
-    testNotify: vi.fn(async () => ({ ok: true }))
+    testNotify: vi.fn(async () => ({ ok: true })),
+    // SettingsView also mounts the Database section (Bolt 4, T16), which calls pgGetStatus on load —
+    // stubbed here so mounting doesn't throw; these tests don't assert on Database section behavior
+    // (see tests/renderer/db-settings.test.ts for that).
+    pgGetStatus: vi.fn(async () => ({ activeBackend: 'sqlite', keychainAvailable: true }))
   }
 })
 

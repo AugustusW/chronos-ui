@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, it, expect, vi } from 'vitest'
-import { openAndMigrate, startCheckpointTimer, startRetentionSweep } from '../../src/main/db/lifecycle'
+import { openAndMigrate, startCheckpointTimer, startRetentionSweep, pgQuitDrain, drainPgHandle } from '../../src/main/db/lifecycle'
 import { listJobs } from '../../src/main/db/jobs.repository'
 import { fileURLToPath } from 'node:url'
 
@@ -57,5 +57,58 @@ describe('startRetentionSweep (review #4)', () => {
     const stop = startRetentionSweep(prune, { intervalMs: 60_000_000, onError })
     await vi.waitFor(() => expect(onError).toHaveBeenCalledTimes(1))
     stop()
+  })
+})
+
+describe('pgQuitDrain (T12)', () => {
+  it('returns null for a sqlite handle — caller keeps its existing fire-and-forget close()', () => {
+    const close = vi.fn(async () => {})
+    const app = { quit: vi.fn() }
+    const drain = pgQuitDrain({ dialect: 'sqlite', close }, app)
+    expect(drain).toBeNull()
+    expect(close).not.toHaveBeenCalled()
+    expect(app.quit).not.toHaveBeenCalled()
+  })
+
+  it('returns null for a null handle (before boot finishes)', () => {
+    const app = { quit: vi.fn() }
+    expect(pgQuitDrain(null, app)).toBeNull()
+  })
+
+  it('for a postgres handle, returns a fn that awaits close() then calls app.quit()', async () => {
+    const order: string[] = []
+    const close = vi.fn(async () => { order.push('close-start'); await Promise.resolve(); order.push('close-end') })
+    const app = { quit: vi.fn(() => order.push('quit')) }
+    const drain = pgQuitDrain({ dialect: 'postgres', close }, app)
+    expect(drain).not.toBeNull()
+    await drain!()
+    expect(order).toEqual(['close-start', 'close-end', 'quit'])
+    expect(app.quit).toHaveBeenCalledOnce()
+  })
+
+  it('still calls app.quit() even when close() rejects (never blocks quitting on a drain failure)', async () => {
+    const close = vi.fn(async () => { throw new Error('pool.end failed') })
+    const app = { quit: vi.fn() }
+    const drain = pgQuitDrain({ dialect: 'postgres', close }, app)
+    await drain!()
+    expect(app.quit).toHaveBeenCalledOnce()
+  })
+})
+
+describe('drainPgHandle (C2 — the core drain pgQuitDrain wraps, also used standalone by IpcDeps.drainDb)', () => {
+  it('awaits handle.close()', async () => {
+    let closed = false
+    const close = vi.fn(async () => { await Promise.resolve(); closed = true })
+    await drainPgHandle({ close })
+    expect(close).toHaveBeenCalledOnce()
+    expect(closed).toBe(true)
+  })
+
+  it('never throws even when close() rejects (best-effort, logged not propagated)', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const close = vi.fn(async () => { throw new Error('pool.end failed') })
+    await expect(drainPgHandle({ close })).resolves.toBeUndefined()
+    expect(errorSpy).toHaveBeenCalled()
+    errorSpy.mockRestore()
   })
 })

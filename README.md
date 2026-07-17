@@ -58,7 +58,7 @@ vim, repeat                       read the run history
 - ✓ Run any job on demand
 - ✓ Run history with captured stdout/stderr and durations
 - ✓ Telegram notifications when a scheduled job fails or times out (immediate, or batched into a digest)
-- ✓ SQLite by default, PostgreSQL optional
+- ✓ SQLite by default, PostgreSQL optional — switch anytime from Settings, with existing data migrated for you
 - ✓ Cross-platform (macOS, Windows; Linux via cron)
 
 ## Screenshot
@@ -73,6 +73,23 @@ ChronosUI reads your native scheduler and shows it in a clean GUI. To record the
 *scheduled* runs, it can "adopt" a job by wrapping its command with a small bundled binary
 (`schedmgr`) — fully transparent (same working directory, environment, and exit code) and
 one-click reversible. The exact `crontab` rewrite is documented in [docs/crontab.md](docs/crontab.md).
+
+### Using PostgreSQL
+
+No schema setup is needed — ChronosUI creates and upgrades its own tables via bundled,
+versioned migrations. Prepare three things, then fill in the connection form under
+Settings → Database:
+
+1. An **empty** database (the switch refuses a database that already contains data,
+   so nothing gets overwritten by accident).
+2. A role that can create tables in that database (e.g. the database owner).
+3. The connection details (host / port / database / user / password).
+
+The connection string is stored in the OS keychain (macOS) or a file readable only by
+your user account, and never appears in cron lines or config files. Ticking
+"Copy existing SQLite data" migrates your jobs, run history and notification settings
+in one transaction; the original `chronos.db` is left untouched as a backup, and you
+can switch back from the same panel at any time.
 
 ## macOS permissions
 
