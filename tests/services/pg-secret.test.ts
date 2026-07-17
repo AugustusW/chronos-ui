@@ -29,8 +29,11 @@ describe('sanitizeService', () => {
 
 describe('pgSecretFallbackPath', () => {
   it('builds <configDir>/<sanitized>.dsn (configDir is already the chronos-ui dir, e.g. goSecretDir output)', () => {
-    expect(pgSecretFallbackPath('/Users/x/Library/Application Support/chronos-ui', 'com.augustusw.chronos-ui/pg-dsn')).toBe(
-      '/Users/x/Library/Application Support/chronos-ui/com.augustusw.chronos-ui_pg-dsn.dsn'
+    // join() is host-native (mirrors Go's filepath.Join in the same binary), so build the
+    // expectation with join too — the assertion is about the sanitized FILENAME, not the separator.
+    const configDir = join('/Users', 'x', 'Library', 'Application Support', 'chronos-ui')
+    expect(pgSecretFallbackPath(configDir, 'com.augustusw.chronos-ui/pg-dsn')).toBe(
+      join(configDir, 'com.augustusw.chronos-ui_pg-dsn.dsn')
     )
   })
 })
@@ -84,7 +87,13 @@ describe('pgSecretStore / pgSecretRead / pgSecretDelete', () => {
     const d = deps({ platform: 'win32' })
     await pgSecretStore('svc-d', 'dsn', d)
     const mode = statSync(pgSecretFallbackPath(dir, 'svc-d')).mode & 0o777
-    expect(mode).toBe(0o600)
+    // POSIX hosts honor the 0600 request; Windows has no POSIX mode bits (Node maps chmod onto
+    // the read-only attribute), so only assert the exact mode where the OS can express it.
+    if (process.platform === 'win32') {
+      expect(existsSync(pgSecretFallbackPath(dir, 'svc-d'))).toBe(true)
+    } else {
+      expect(mode).toBe(0o600)
+    }
   })
 
   it('store -> read roundtrips through the fallback file (win32, no keychain)', async () => {
