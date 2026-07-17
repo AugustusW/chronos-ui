@@ -118,3 +118,79 @@ describe('SettingsView Database — selecting PostgreSQL (T16)', () => {
     })
   })
 })
+
+describe('SettingsView Database — Test connection UI (T17)', () => {
+  it('shows a green OK row with version + latency on a successful probe', async () => {
+    pgTestConnection.mockResolvedValue({ ok: true, version: 'PostgreSQL 16.4', ms: 42 })
+    const w = mount(SettingsView)
+    await flushPromises()
+    await w.find('[data-test="db-backend-postgres"]').trigger('click')
+    await w.find('[data-test="db-test"]').trigger('click')
+    await flushPromises()
+    const row = w.find('[data-test="db-test-result"]')
+    expect(row.exists()).toBe(true)
+    expect(row.classes()).toContain('ok')
+    expect(row.text()).toBe('Connection OK — PostgreSQL 16.4 (42 ms)')
+  })
+
+  it('shows a red failure row with the (already-redacted) error on a failed probe', async () => {
+    pgTestConnection.mockResolvedValue({ ok: false, error: 'connection refused' })
+    const w = mount(SettingsView)
+    await flushPromises()
+    await w.find('[data-test="db-backend-postgres"]').trigger('click')
+    await w.find('[data-test="db-test"]').trigger('click')
+    await flushPromises()
+    const row = w.find('[data-test="db-test-result"]')
+    expect(row.exists()).toBe(true)
+    expect(row.classes()).toContain('err')
+    expect(row.text()).toContain('connection refused')
+  })
+
+  it('shows no result row before Test connection has been clicked', async () => {
+    const w = mount(SettingsView)
+    await flushPromises()
+    await w.find('[data-test="db-backend-postgres"]').trigger('click')
+    expect(w.find('[data-test="db-test-result"]').exists()).toBe(false)
+  })
+})
+
+describe('SettingsView Database — switching back to SQLite (T17)', () => {
+  it('when active=postgres and SQLite is selected, the form collapses to an explanation + Save & switch (no connection fields)', async () => {
+    pgGetStatus.mockResolvedValue({ activeBackend: 'postgres', keychainAvailable: true })
+    const w = mount(SettingsView)
+    await flushPromises()
+    // selectedBackend syncs to the active backend on load — already 'postgres' here, so explicitly
+    // pick SQLite to exercise the "switch back" branch (distinct from the T16 default-sqlite state,
+    // which requires active=sqlite too).
+    await w.find('[data-test="db-backend-sqlite"]').trigger('click')
+    expect(w.find('[data-test="db-host"]').exists()).toBe(false)
+    expect(w.find('[data-test="db-test"]').exists()).toBe(false)
+    expect(w.find('[data-test="db-copydata"]').exists()).toBe(false)
+    expect(w.find('[data-test="db-switch-note"]').exists()).toBe(true)
+    expect(w.find('[data-test="db-save-switch"]').exists()).toBe(true)
+    expect(w.find('[data-test="db-sqlite-info"]').exists()).toBe(false) // active is still postgres, not the "already sqlite" info row
+  })
+
+  it('confirming Save & switch there calls pgSaveSwitch with targetBackend=sqlite', async () => {
+    pgGetStatus.mockResolvedValue({ activeBackend: 'postgres', keychainAvailable: true })
+    window.confirm = vi.fn(() => true)
+    const w = mount(SettingsView)
+    await flushPromises()
+    await w.find('[data-test="db-backend-sqlite"]').trigger('click')
+    await w.find('[data-test="db-save-switch"]').trigger('click')
+    await flushPromises()
+    expect(window.confirm).toHaveBeenCalledWith(expect.stringMatching(/restart/i))
+    expect(pgSaveSwitch).toHaveBeenCalledWith(expect.objectContaining({ targetBackend: 'sqlite' }))
+  })
+
+  it('rejecting the confirm on the switch-back path does NOT call pgSaveSwitch', async () => {
+    pgGetStatus.mockResolvedValue({ activeBackend: 'postgres', keychainAvailable: true })
+    window.confirm = vi.fn(() => false)
+    const w = mount(SettingsView)
+    await flushPromises()
+    await w.find('[data-test="db-backend-sqlite"]').trigger('click')
+    await w.find('[data-test="db-save-switch"]').trigger('click')
+    await flushPromises()
+    expect(pgSaveSwitch).not.toHaveBeenCalled()
+  })
+})
