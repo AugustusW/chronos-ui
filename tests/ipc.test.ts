@@ -31,6 +31,7 @@ const deps = (over: Partial<IpcDeps> = {}): IpcDeps => ({
   pgSwitchToPostgres: async () => ({ ok: true, needRelaunch: true }),
   pgSwitchToSqlite: async () => ({ ok: true, needRelaunch: true }),
   pgGetStatus: async () => ({ activeBackend: 'sqlite', keychainAvailable: true }),
+  drainDb: async () => {},
   relaunchApp: () => {},
   exitApp: () => {},
   ...over
@@ -218,7 +219,12 @@ describe('handlePgSaveSwitch validation (T13)', () => {
   })
   it('ignores malformed fields when targetBackend=sqlite (fields are irrelevant to a switch-back)', async () => {
     let switched = false
-    const d = deps({ pgSwitchToSqlite: async () => { switched = true; return { ok: true, needRelaunch: true } } })
+    // activeBackend must differ from the sqlite target, or the I3 already-active guard rejects this
+    // before ever reaching pgSwitchToSqlite (see the dedicated I3 describe block below).
+    const d = deps({
+      pgGetStatus: async () => ({ activeBackend: 'postgres', keychainAvailable: true }),
+      pgSwitchToSqlite: async () => { switched = true; return { ok: true, needRelaunch: true } }
+    })
     const r = await handlePgSaveSwitch(d, {
       fields: { host: '', port: -1, database: '', user: '', password: '', sslmode: 'nope' },
       copyData: false,
@@ -257,33 +263,39 @@ describe('handlePgSaveSwitch — password never leaks (T13)', () => {
   })
 })
 
-describe('handlePgSaveSwitch — relaunch/exit after a successful switch (plan-advisor H2, T13)', () => {
-  it('calls relaunchApp then exitApp after a successful postgres switch', async () => {
+describe('handlePgSaveSwitch — drain, then relaunch/exit after a successful switch (plan-advisor H2 / C2, T13)', () => {
+  it('awaits drainDb, then calls relaunchApp then exitApp, after a successful postgres switch', async () => {
     const calls: string[] = []
     const d = deps({
       pgSwitchToPostgres: async () => ({ ok: true, needRelaunch: true }),
+      drainDb: async () => { calls.push('drain') },
       relaunchApp: () => calls.push('relaunch'),
       exitApp: () => calls.push('exit')
     })
     const r = await handlePgSaveSwitch(d, { fields: validPgFields, copyData: true, targetBackend: 'postgres' })
     expect(r).toEqual({ ok: true })
-    expect(calls).toEqual(['relaunch', 'exit'])
+    expect(calls).toEqual(['drain', 'relaunch', 'exit'])
   })
-  it('calls relaunchApp then exitApp after a successful sqlite switch', async () => {
+  it('awaits drainDb, then calls relaunchApp then exitApp, after a successful sqlite switch', async () => {
     const calls: string[] = []
+    // activeBackend must differ from the sqlite target here, or the I3 already-active guard
+    // (below) rejects this as a no-op before ever reaching pgSwitchToSqlite/drainDb/relaunch/exit.
     const d = deps({
+      pgGetStatus: async () => ({ activeBackend: 'postgres', keychainAvailable: true }),
       pgSwitchToSqlite: async () => ({ ok: true, needRelaunch: true }),
+      drainDb: async () => { calls.push('drain') },
       relaunchApp: () => calls.push('relaunch'),
       exitApp: () => calls.push('exit')
     })
     const r = await handlePgSaveSwitch(d, { fields: validPgFields, copyData: false, targetBackend: 'sqlite' })
     expect(r).toEqual({ ok: true })
-    expect(calls).toEqual(['relaunch', 'exit'])
+    expect(calls).toEqual(['drain', 'relaunch', 'exit'])
   })
-  it('does NOT call relaunch/exit when the switch fails', async () => {
+  it('does NOT drain / relaunch / exit when the switch fails', async () => {
     const calls: string[] = []
     const d = deps({
       pgSwitchToPostgres: async () => ({ ok: false, error: 'boom', stage: 'testConnection' }),
+      drainDb: async () => { calls.push('drain') },
       relaunchApp: () => calls.push('relaunch'),
       exitApp: () => calls.push('exit')
     })
@@ -291,12 +303,55 @@ describe('handlePgSaveSwitch — relaunch/exit after a successful switch (plan-a
     expect(r).toEqual({ ok: false, error: 'boom' })
     expect(calls).toEqual([])
   })
-  it('does NOT call relaunch/exit when validation rejects before any switch attempt', async () => {
+  it('does NOT drain / relaunch / exit when validation rejects before any switch attempt', async () => {
     const calls: string[] = []
-    const d = deps({ relaunchApp: () => calls.push('relaunch'), exitApp: () => calls.push('exit') })
+    const d = deps({
+      drainDb: async () => { calls.push('drain') },
+      relaunchApp: () => calls.push('relaunch'),
+      exitApp: () => calls.push('exit')
+    })
     const r = await handlePgSaveSwitch(d, { fields: { ...validPgFields, host: '' }, copyData: false, targetBackend: 'postgres' })
     expect(r.ok).toBe(false)
     expect(calls).toEqual([])
+  })
+})
+
+describe('handlePgSaveSwitch — rejects switching to the already-active backend (I3, T13)', () => {
+  it('rejects targetBackend=postgres when postgres is already active, without calling pgSwitchToPostgres', async () => {
+    let switched = false
+    const d = deps({
+      pgGetStatus: async () => ({ activeBackend: 'postgres', keychainAvailable: true }),
+      pgSwitchToPostgres: async () => { switched = true; return { ok: true, needRelaunch: true } }
+    })
+    const r = await handlePgSaveSwitch(d, { fields: validPgFields, copyData: false, targetBackend: 'postgres' })
+    expect(r).toEqual({ ok: false, error: 'Already using PostgreSQL backend' })
+    expect(switched).toBe(false)
+  })
+  it('rejects targetBackend=sqlite when sqlite is already active, without calling pgSwitchToSqlite', async () => {
+    let switched = false
+    const d = deps({
+      pgGetStatus: async () => ({ activeBackend: 'sqlite', keychainAvailable: true }),
+      pgSwitchToSqlite: async () => { switched = true; return { ok: true, needRelaunch: true } }
+    })
+    const r = await handlePgSaveSwitch(d, { fields: validPgFields, copyData: false, targetBackend: 'sqlite' })
+    expect(r).toEqual({ ok: false, error: 'Already using SQLite backend' })
+    expect(switched).toBe(false)
+  })
+  it('does not relaunch/exit/drain when rejected as already-active', async () => {
+    const calls: string[] = []
+    const d = deps({
+      pgGetStatus: async () => ({ activeBackend: 'postgres', keychainAvailable: true }),
+      drainDb: async () => { calls.push('drain') },
+      relaunchApp: () => calls.push('relaunch'),
+      exitApp: () => calls.push('exit')
+    })
+    await handlePgSaveSwitch(d, { fields: validPgFields, copyData: false, targetBackend: 'postgres' })
+    expect(calls).toEqual([])
+  })
+  it('a targetBackend that differs from the active backend still proceeds normally', async () => {
+    const d = deps({ pgGetStatus: async () => ({ activeBackend: 'sqlite', keychainAvailable: true }) })
+    const r = await handlePgSaveSwitch(d, { fields: validPgFields, copyData: true, targetBackend: 'postgres' })
+    expect(r).toEqual({ ok: true })
   })
 })
 

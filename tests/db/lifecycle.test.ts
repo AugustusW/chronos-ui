@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, it, expect, vi } from 'vitest'
-import { openAndMigrate, startCheckpointTimer, startRetentionSweep, pgQuitDrain } from '../../src/main/db/lifecycle'
+import { openAndMigrate, startCheckpointTimer, startRetentionSweep, pgQuitDrain, drainPgHandle } from '../../src/main/db/lifecycle'
 import { listJobs } from '../../src/main/db/jobs.repository'
 import { fileURLToPath } from 'node:url'
 
@@ -92,5 +92,23 @@ describe('pgQuitDrain (T12)', () => {
     const drain = pgQuitDrain({ dialect: 'postgres', close }, app)
     await drain!()
     expect(app.quit).toHaveBeenCalledOnce()
+  })
+})
+
+describe('drainPgHandle (C2 — the core drain pgQuitDrain wraps, also used standalone by IpcDeps.drainDb)', () => {
+  it('awaits handle.close()', async () => {
+    let closed = false
+    const close = vi.fn(async () => { await Promise.resolve(); closed = true })
+    await drainPgHandle({ close })
+    expect(close).toHaveBeenCalledOnce()
+    expect(closed).toBe(true)
+  })
+
+  it('never throws even when close() rejects (best-effort, logged not propagated)', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const close = vi.fn(async () => { throw new Error('pool.end failed') })
+    await expect(drainPgHandle({ close })).resolves.toBeUndefined()
+    expect(errorSpy).toHaveBeenCalled()
+    errorSpy.mockRestore()
   })
 })

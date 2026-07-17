@@ -2,6 +2,20 @@
 import { createDatabase, type BackendConfig, type DatabaseHandle } from './client'
 import { runMigrations } from './migrate'
 
+/** The actual drain: await `handle.close()`, logging (never throwing) on failure. Shared by
+ *  pgQuitDrain below (which additionally re-invokes `app.quit()` once this settles, for the
+ *  `before-quit` path) and bootstrap.ts's `IpcDeps.drainDb` (C2, code review): `app.exit()` — unlike
+ *  `app.quit()` — never fires `before-quit`, so ipc.ts's handlePgSaveSwitch (which calls
+ *  `relaunchApp()`/`exitApp()` after a successful backend switch) must await this DIRECTLY before
+ *  exiting, or a live postgres pool is never drained on that path at all. */
+export async function drainPgHandle(handle: Pick<DatabaseHandle, 'close'>): Promise<void> {
+  try {
+    await handle.close()
+  } catch (err) {
+    console.error('chronos: postgres pool drain failed (continuing anyway):', err)
+  }
+}
+
 /** T12: the `before-quit` handling a possibly-postgres DatabaseHandle needs. SQLite's close() is
  *  synchronous internally (a fire-and-forget close from the caller is safe — nothing async races
  *  the process exit), but Postgres's pool.end() is a real async drain: cutting the process before
@@ -10,21 +24,16 @@ import { runMigrations } from './migrate'
  *  postgres it returns a function the caller must run AFTER calling `event.preventDefault()`, which
  *  itself calls `app.quit()` again once the drain settles (Electron's before-quit is
  *  edge-triggered: calling preventDefault() cancels the ENTIRE quit sequence until something
- *  re-requests it). A failed drain is logged but never blocks quitting — app.quit() runs in a
- *  `finally` regardless of whether close() resolved or rejected. */
+ *  re-requests it). A failed drain (drainPgHandle) is logged but never blocks quitting —
+ *  app.quit() runs regardless of whether close() resolved or rejected. */
 export function pgQuitDrain(
   handle: Pick<DatabaseHandle, 'dialect' | 'close'> | null,
   app: { quit(): void }
 ): (() => Promise<void>) | null {
   if (!handle || handle.dialect !== 'postgres') return null
   return async () => {
-    try {
-      await handle.close()
-    } catch (err) {
-      console.error('chronos: postgres pool drain failed during quit (quitting anyway):', err)
-    } finally {
-      app.quit()
-    }
+    await drainPgHandle(handle)
+    app.quit()
   }
 }
 

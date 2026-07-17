@@ -4,7 +4,7 @@ import { writeFileSync, rmSync, mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, dirname } from 'node:path'
 import type { DatabaseHandle } from './db/client'
-import { openAndMigrate } from './db/lifecycle'
+import { openAndMigrate, drainPgHandle } from './db/lifecycle'
 import { createRepositories } from './db/repositories'
 import { readBackendConfig } from './db/backendConfig'
 import { schedmgrDbDescriptor } from './scheduler/descriptor'
@@ -308,6 +308,11 @@ export async function buildMainDeps(app: App, opts: BuildOpts = {}): Promise<Bui
   const pgGetStatus = (): Promise<PgStatus> =>
     Promise.resolve({ activeBackend: cfg.backend, keychainAvailable: keychainWriteSupported(platform) })
 
+  // C2: drains the SAME `handle` this boot opened above — a no-op for a sqlite handle (its close()
+  // is synchronous internally, so nothing needs awaiting before ipc.ts's handlePgSaveSwitch calls
+  // relaunchApp()/exitApp()), a real drainPgHandle (db/lifecycle.ts) for a postgres handle.
+  const drainDb = (): Promise<void> => (handle.dialect === 'postgres' ? drainPgHandle(handle) : Promise.resolve())
+
   const deps: IpcDeps = {
     meta: { name: app.getName(), version: app.getVersion() },
     service,
@@ -321,6 +326,7 @@ export async function buildMainDeps(app: App, opts: BuildOpts = {}): Promise<Bui
     pgSwitchToPostgres,
     pgSwitchToSqlite,
     pgGetStatus,
+    drainDb,
     relaunchApp: opts.relaunchApp ?? (() => {}),
     exitApp: opts.exitApp ?? (() => {})
   }

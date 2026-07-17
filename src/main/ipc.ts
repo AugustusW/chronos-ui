@@ -29,9 +29,16 @@ export interface IpcDeps {
   // keychain, so the settings UI can render its badge + fallback-storage warning without the
   // renderer itself knowing anything about backendConfig.json or keychain plumbing.
   pgGetStatus: () => Promise<PgStatus>
-  /** electron's app.relaunch() / app.exit(), called (in that order) after a successful backend
-   *  switch — kept as two separate functions (rather than one combined "restart" fn) so a test can
-   *  assert BOTH were actually invoked (plan-advisor H2), not just that "something" ran. */
+  /** Drains a live postgres pool (db/lifecycle.ts's drainPgHandle), no-op for a sqlite handle —
+   *  MUST be awaited before relaunchApp()/exitApp() below (C2, code review). electron's app.exit()
+   *  (unlike app.quit()) never fires 'before-quit', which is the ONLY place index.ts's own
+   *  pgQuitDrain teardown is wired up — so without this explicit await, a switch-triggered exit
+   *  would skip pool draining entirely and could cut an in-flight write. */
+  drainDb: () => Promise<void>
+  /** electron's app.relaunch() / app.exit(), called (in that order, AFTER drainDb above) after a
+   *  successful backend switch — kept as two separate functions (rather than one combined "restart"
+   *  fn) so a test can assert BOTH were actually invoked (plan-advisor H2), not just that "something"
+   *  ran. */
   relaunchApp: () => void
   exitApp: () => void
 }
@@ -194,18 +201,35 @@ export async function handlePgTestConnection(deps: IpcDeps, payload: unknown): P
 export async function handlePgSaveSwitch(deps: IpcDeps, payload: unknown): Promise<PgSaveSwitchResult> {
   const p = payload as Partial<PgSaveSwitchInput> | null | undefined
   if (!p || typeof p !== 'object') return { ok: false, error: 'invalid payload' }
+  if (p.targetBackend !== 'postgres' && p.targetBackend !== 'sqlite') return { ok: false, error: 'invalid targetBackend' }
+
+  // I3 (code review): reject a switch to the backend that's already active. Without this guard, a
+  // resubmitted targetBackend equal to the currently-running backend would call pgSwitchToPostgres/
+  // pgSwitchToSqlite against a live `sqliteHandle` that is — despite the name — ALREADY a postgres
+  // handle once the process booted postgres, purely because the field happens to be present either
+  // way; it "works" only by accident of both dialects sharing a handle shape.
+  const { activeBackend } = await deps.pgGetStatus()
+  if (p.targetBackend === activeBackend) {
+    return { ok: false, error: activeBackend === 'postgres' ? 'Already using PostgreSQL backend' : 'Already using SQLite backend' }
+  }
+
   if (p.targetBackend === 'sqlite') {
     const res = await deps.pgSwitchToSqlite()
     if (!res.ok) return { ok: false, error: res.error }
+    // C2: drain a live postgres pool BEFORE relaunch/exit — app.exit() never fires 'before-quit'
+    // (the only place index.ts's own pgQuitDrain teardown runs), so without this the pool would
+    // never be drained on this path.
+    await deps.drainDb()
     deps.relaunchApp()
     deps.exitApp()
     return { ok: true }
   }
-  if (p.targetBackend !== 'postgres') return { ok: false, error: 'invalid targetBackend' }
+
   if (!isPgFields(p.fields)) return { ok: false, error: 'invalid connection fields' }
   if (typeof p.copyData !== 'boolean') return { ok: false, error: 'invalid copyData' }
   const res = await deps.pgSwitchToPostgres({ dsn: buildDsn(p.fields), copy: p.copyData })
   if (!res.ok) return { ok: false, error: res.error }
+  await deps.drainDb()
   deps.relaunchApp()
   deps.exitApp()
   return { ok: true }

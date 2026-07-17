@@ -266,6 +266,37 @@ describe('buildMainDeps pgGetStatus wiring (T15)', () => {
 })
 
 // ---------------------------------------------------------------------------------------------
+// C2 (code review) — IpcDeps.drainDb: ipc.ts's handlePgSaveSwitch awaits this before calling
+// relaunchApp()/exitApp() after a successful backend switch, since electron's app.exit() never
+// fires 'before-quit' (the only place index.ts's own pgQuitDrain teardown runs). Wired here to the
+// SAME `handle` this boot already opened — draining it for real on a postgres boot, doing nothing
+// on a sqlite boot (sqlite's close() is synchronous internally; nothing to await-drain).
+// ---------------------------------------------------------------------------------------------
+describe('buildMainDeps drainDb wiring (C2)', () => {
+  it('is a no-op for a sqlite boot — never calls handle.close()', async () => {
+    const built = await buildMainDeps(fakeApp, { exec, platform: 'darwin', appRoot: APP_ROOT, resourcesPath: '/x', dbPath: ':memory:' })
+    const closeSpy = vi.fn(built.handle.close.bind(built.handle))
+    built.handle.close = closeSpy
+    await built.deps.drainDb()
+    expect(closeSpy).not.toHaveBeenCalled()
+    await built.handle.close()
+  })
+
+  it('drains (awaits close()) the live postgres handle for a postgres boot', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'chronos-boot-c2-'))
+    writeFileSync(join(dir, 'chronos-config.json'), JSON.stringify({ backend: 'postgres', pgService: 'svc-drain' }))
+    const pgApp = { ...fakeApp, getPath: () => dir }
+    const pgSecretRead = vi.fn(async () => 'postgresql://u:p@h/db')
+    const closeSpy = vi.fn(async () => {})
+    const openAndMigrate = vi.fn(async () => ({ ...fakePgHandle(), close: closeSpy }))
+    const built = await buildMainDeps(pgApp, { exec, platform: 'darwin', appRoot: APP_ROOT, resourcesPath: '/x', pgSecretRead, openAndMigrate })
+    await built.deps.drainDb()
+    expect(closeSpy).toHaveBeenCalledOnce()
+    rmSync(dir, { recursive: true, force: true })
+  })
+})
+
+// ---------------------------------------------------------------------------------------------
 // T12 — index.ts's catch handler for a BootPgUnreachableError: a blocking "Database unreachable"
 // dialog offering a session-only sqlite fallback or quitting outright. handleBootPgUnreachable is
 // the pure, Electron-free decision function index.ts wires dialog.showMessageBox/app.quit into.
