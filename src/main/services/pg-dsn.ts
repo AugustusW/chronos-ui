@@ -21,15 +21,20 @@ function bracketHost(host: string): string {
   return host.includes(':') ? `[${host}]` : host
 }
 
-/** `postgresql://user:pass@host:port/db?sslmode=<v>`. Only `user`/`password` are
- *  encodeURIComponent'd (they are the two fields a user can type arbitrary text into that would
- *  otherwise break URL parsing, e.g. `@ : / # ?`) — `host`/`database`/`sslmode` are expected to be
- *  simple tokens (a bracketed IPv6 literal, and a Postgres identifier / enum value respectively). */
+/** `postgresql://user:pass@host:port/db?sslmode=<v>`. `user`/`password`/`database` are all
+ *  encodeURIComponent'd — every one of them is a field a user can type arbitrary Postgres-identifier
+ *  text into (`@ : / # ?`) that would otherwise break URL parsing; `database` in particular sits in
+ *  the URL's path segment, where an unencoded `/` splits the path and an unencoded `?`/`#` reopens
+ *  the query string / fragment (code review M2 — a database named e.g. `db/name?x` would otherwise
+ *  silently point the DSN at the wrong path and corrupt the sslmode query param). `host`/`sslmode`
+ *  are the only two fields still expected to be simple tokens (a bracketed IPv6 literal, and a fixed
+ *  enum value respectively). */
 export function buildDsn(parts: PgDsnParts): string {
   const user = encodeURIComponent(parts.user)
   const password = encodeURIComponent(parts.password)
   const host = bracketHost(parts.host)
-  return `postgresql://${user}:${password}@${host}:${parts.port}/${parts.database}?sslmode=${parts.sslmode}`
+  const database = encodeURIComponent(parts.database)
+  return `postgresql://${user}:${password}@${host}:${parts.port}/${database}?sslmode=${parts.sslmode}`
 }
 
 /** Replaces the password segment of a `scheme://user:password@...` DSN with `***`, for safe

@@ -37,6 +37,16 @@ describe('buildDsn', () => {
       'postgresql://u:p@localhost:5432/db?sslmode=disable'
     )
   })
+
+  it('encodeURIComponents special characters in the database name (M2) — a bare "/" or "?" would otherwise reshape the URL', () => {
+    // Without encoding, "db/name?extra" splits the path at '/' and reopens the query string at '?',
+    // producing "...5432/db/name?extra?sslmode=disable" — a URL that no longer points at the
+    // intended database and mangles sslmode into a second bogus query param.
+    const dsn = buildDsn({ host: 'h', port: 5432, database: 'db/name?extra#frag', user: 'u', password: 'p', sslmode: 'disable' })
+    expect(dsn).toBe('postgresql://u:p@h:5432/db%2Fname%3Fextra%23frag?sslmode=disable')
+    expect(new URL(dsn).pathname).toBe('/db%2Fname%3Fextra%23frag')
+    expect(new URL(dsn).search).toBe('?sslmode=disable')
+  })
 })
 
 describe('redactDsn', () => {
