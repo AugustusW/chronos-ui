@@ -20,7 +20,7 @@ import { createLaunchdFlush, type FlushScheduler } from './services/notify-flush
 import { runNow, runNowStreaming as runStreamingImpl, type SpawnLike } from './runner/manual-run'
 import { makeRunEmitter, type WebContentsLike } from './runner/run-emitter'
 import { createBatchRunner } from './runner/batch-run'
-import { pgSecretRead, type PgSecretDeps } from './services/pg-secret'
+import { pgSecretRead } from './services/pg-secret'
 import { redactDsn } from './services/pg-dsn'
 import { testConnection, switchToPostgres, switchToSqlite, type SwitchResult, type TestConnectionResult } from './services/backend-switch'
 import type { IpcDeps } from './ipc'

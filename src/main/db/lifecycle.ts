@@ -2,6 +2,32 @@
 import { createDatabase, type BackendConfig, type DatabaseHandle } from './client'
 import { runMigrations } from './migrate'
 
+/** T12: the `before-quit` handling a possibly-postgres DatabaseHandle needs. SQLite's close() is
+ *  synchronous internally (a fire-and-forget close from the caller is safe — nothing async races
+ *  the process exit), but Postgres's pool.end() is a real async drain: cutting the process before
+ *  it settles could abort an in-flight write. Returns null for a sqlite handle (or no handle at
+ *  all — e.g. before boot finishes), so the caller keeps its existing fire-and-forget close(); for
+ *  postgres it returns a function the caller must run AFTER calling `event.preventDefault()`, which
+ *  itself calls `app.quit()` again once the drain settles (Electron's before-quit is
+ *  edge-triggered: calling preventDefault() cancels the ENTIRE quit sequence until something
+ *  re-requests it). A failed drain is logged but never blocks quitting — app.quit() runs in a
+ *  `finally` regardless of whether close() resolved or rejected. */
+export function pgQuitDrain(
+  handle: Pick<DatabaseHandle, 'dialect' | 'close'> | null,
+  app: { quit(): void }
+): (() => Promise<void>) | null {
+  if (!handle || handle.dialect !== 'postgres') return null
+  return async () => {
+    try {
+      await handle.close()
+    } catch (err) {
+      console.error('chronos: postgres pool drain failed during quit (quitting anyway):', err)
+    } finally {
+      app.quit()
+    }
+  }
+}
+
 /**
  * Open the DB for the given backend and bring its schema up to date (Drizzle migrate is
  * idempotent — architect Q5). `paths` provides both per-dialect migration folders; the active

@@ -3,9 +3,9 @@ import { app, BrowserWindow, dialog, shell } from 'electron'
 import { join } from 'path'
 import { pathToFileURL } from 'node:url'
 import { installCrashGuards } from './crash-guards'
-import { buildMainDeps } from './bootstrap'
+import { buildMainDeps, BootPgUnreachableError, handleBootPgUnreachable, type BuiltDeps } from './bootstrap'
 import { registerIpcHandlers } from './ipc'
-import { startCheckpointTimer, startRetentionSweep } from './db/lifecycle'
+import { startCheckpointTimer, startRetentionSweep, pgQuitDrain } from './db/lifecycle'
 import { watchDbForChanges } from './db/watch'
 import type { DatabaseHandle } from './db/client'
 import { createTray, type TrayHandle } from './tray'
@@ -49,7 +49,31 @@ function createWindow(): void {
 }
 
 app.whenReady().then(async () => {
-  const built = await buildMainDeps(app, { getWebContents: () => BrowserWindow.getAllWindows()[0]?.webContents })
+  // Boot deps: getWebContents (live-run emitter target) + relaunchApp/exitApp (T13's pg
+  // settings-UI save/switch needs both after a successful backend switch). Shared between the
+  // initial attempt and the T12 session-only sqlite fallback below, so both boot the SAME way.
+  const bootOpts = {
+    getWebContents: () => BrowserWindow.getAllWindows()[0]?.webContents,
+    relaunchApp: () => app.relaunch(),
+    exitApp: () => app.exit()
+  }
+  let built: BuiltDeps
+  try {
+    built = await buildMainDeps(app, bootOpts)
+  } catch (err) {
+    // T12: a postgres backend configured but unreachable at boot is NEVER silently downgraded to
+    // sqlite — put up a blocking dialog and let the user choose. Any other boot failure is a real
+    // bug, not a user-facing config problem, so it is rethrown (installCrashGuards' unhandledRejection
+    // guard — or the thrown error surfacing as a rejected whenReady().then() — reports it visibly).
+    if (!(err instanceof BootPgUnreachableError)) throw err
+    const fallback = await handleBootPgUnreachable(err, {
+      showMessageBox: (opts) => dialog.showMessageBox(opts),
+      quit: () => app.quit(),
+      buildSqliteFallback: () => buildMainDeps(app, { ...bootOpts, forceSqlite: true })
+    })
+    if (!fallback) return // user chose Quit — handleBootPgUnreachable already called app.quit()
+    built = fallback
+  }
   dbHandle = built.handle
   dbHandle.checkpoint() // passive checkpoint on open (spec §7)
   stopCheckpoint = startCheckpointTimer(dbHandle)
@@ -75,17 +99,28 @@ app.whenReady().then(async () => {
   })
 })
 
-app.on('before-quit', () => {
+app.on('before-quit', (e) => {
   tray?.destroy(); tray = null
   stopCheckpoint?.()
   stopRetention?.()
   stopWatch?.()
   if (poll) clearInterval(poll)
   dbHandle?.checkpoint()
-  // SQLite close() is synchronous internally (resolved promise), so this completes during quit.
-  // Plan 3 (postgres backend) will need the e.preventDefault()+app.quit() pattern to truly await
-  // pool.end() before exiting; for the sqlite default the floating promise is intentional.
-  void dbHandle?.close()
+  // T12: a postgres pool needs its drain (pool.end()) awaited before the process actually exits —
+  // pgQuitDrain returns null for sqlite (whose close() is synchronous internally, so the existing
+  // fire-and-forget below stays correct and simplest for that case).
+  const drain = pgQuitDrain(dbHandle, app)
+  if (drain) {
+    e.preventDefault()
+    // Guard against re-entry: drain() calls app.quit() again once it settles, which re-fires this
+    // same 'before-quit' listener. Nulling dbHandle first means the SECOND firing sees no postgres
+    // handle to drain (pgQuitDrain returns null) and falls through to the plain close() below,
+    // which is a no-op on a null handle — so the quit actually completes instead of looping.
+    dbHandle = null
+    void drain()
+  } else {
+    void dbHandle?.close()
+  }
 })
 
 app.on('window-all-closed', () => {
