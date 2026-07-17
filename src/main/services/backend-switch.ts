@@ -220,6 +220,18 @@ export class CopyCountMismatchError extends Error {
   }
 }
 
+/** `Math.max(...rows.map(r => r.id))` spreads the whole array as call arguments — fine for a small
+ *  fixture, but run_logs alone easily exceeds V8's call-stack argument limit at real-world scale
+ *  (90-day retention, code review C3): a 130k-row array throws "RangeError: Maximum call stack size
+ *  exceeded" instead of computing a max. A plain reduce is the same O(n) cost with no such ceiling,
+ *  and is shared by all three of copyData's setval() sites below (jobs/run_logs/notify_outbox) so
+ *  the fix is applied uniformly rather than three separate ad-hoc loops. */
+export function maxRowId(rows: readonly { id: number }[]): number {
+  let max = 0
+  for (const r of rows) if (r.id > max) max = r.id
+  return max
+}
+
 /** PG's `text` type rejects a NUL byte outright (the row insert would throw); SQLite's `text`
  *  column has no such restriction, so captured stdout/stderr (schema.ts's run_logs.stdout/stderr,
  *  never length-validated beyond output.ts's keepLastBytes tail-truncation) can legally contain
@@ -263,7 +275,7 @@ export async function copyData(
       const jobRows = await sqliteDb.select().from(sqliteSchema.jobs)
       if (jobRows.length > 0) {
         await tx.insert(pgSchema.jobs).values(jobRows as unknown as (typeof pgSchema.jobs.$inferInsert)[])
-        await tx.execute(sql`SELECT setval('jobs_id_seq', ${Math.max(...jobRows.map((r) => r.id))})`)
+        await tx.execute(sql`SELECT setval('jobs_id_seq', ${maxRowId(jobRows)})`)
       }
       const jobsInserted = (await tx.select().from(pgSchema.jobs)).length
       if (jobsInserted !== jobRows.length) throw new CopyCountMismatchError('jobs', jobRows.length, jobsInserted)
@@ -277,7 +289,7 @@ export async function copyData(
           stderr: r.stderr == null ? r.stderr : stripNul(r.stderr)
         }))
         await tx.insert(pgSchema.runLogs).values(sanitized as unknown as (typeof pgSchema.runLogs.$inferInsert)[])
-        await tx.execute(sql`SELECT setval('run_logs_id_seq', ${Math.max(...runLogRows.map((r) => r.id))})`)
+        await tx.execute(sql`SELECT setval('run_logs_id_seq', ${maxRowId(runLogRows)})`)
       }
       const runLogsInserted = (await tx.select().from(pgSchema.runLogs)).length
       if (runLogsInserted !== runLogRows.length) throw new CopyCountMismatchError('run_logs', runLogRows.length, runLogsInserted)
@@ -298,7 +310,7 @@ export async function copyData(
       const outboxRows = await sqliteDb.select().from(sqliteSchema.notifyOutbox)
       if (outboxRows.length > 0) {
         await tx.insert(pgSchema.notifyOutbox).values(outboxRows as unknown as (typeof pgSchema.notifyOutbox.$inferInsert)[])
-        await tx.execute(sql`SELECT setval('notify_outbox_id_seq', ${Math.max(...outboxRows.map((r) => r.id))})`)
+        await tx.execute(sql`SELECT setval('notify_outbox_id_seq', ${maxRowId(outboxRows)})`)
       }
       const outboxInserted = (await tx.select().from(pgSchema.notifyOutbox)).length
       if (outboxInserted !== outboxRows.length) throw new CopyCountMismatchError('notify_outbox', outboxRows.length, outboxInserted)

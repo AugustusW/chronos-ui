@@ -8,6 +8,7 @@ import {
   rebakeDescriptors,
   switchToPostgres,
   switchToSqlite,
+  maxRowId,
   PG_DSN_SERVICE,
   type PgClientLike,
   type RebakeDeps,
@@ -78,6 +79,34 @@ describe('testConnection (unit, mocked pg.Client)', () => {
     const res = await testConnection('postgresql://u:p@host:5432/db', factory)
     expect(res.ok).toBe(false)
     if (!res.ok) expect(res.error).toBe('password authentication failed for user "u"')
+  })
+})
+
+// ---------------------------------------------------------------------------------------------
+// maxRowId (C3, code review) — copyData's three setval() calls used to compute the max id via
+// `Math.max(...rows.map(r => r.id))`; spreading a >~100k-element array as call arguments overflows
+// V8's call-stack argument limit (a bare `Math.max(...Array.from({length:130000}))` throws
+// "RangeError: Maximum call stack size exceeded" — reproduced standalone below, independent of
+// copyData's DB plumbing, since run_logs alone easily exceeds 100k rows at the default 90-day
+// retention). maxRowId replaces the spread with a plain reduce, which has no such ceiling.
+// ---------------------------------------------------------------------------------------------
+describe('maxRowId (C3, copyData sequence fix-up helper)', () => {
+  it('demonstrates the Math.max(...spread) pattern it replaces overflows the call stack at scale', () => {
+    const rows = Array.from({ length: 130_000 }, (_, i) => ({ id: i + 1 }))
+    expect(() => Math.max(...rows.map((r) => r.id))).toThrow(RangeError)
+  })
+
+  it('computes the max id for a 130k-row array without throwing', () => {
+    const rows = Array.from({ length: 130_000 }, (_, i) => ({ id: i + 1 }))
+    expect(maxRowId(rows)).toBe(130_000)
+  })
+
+  it('returns 0 for an empty array (mirrors the guarded call sites, which only run when rows.length > 0)', () => {
+    expect(maxRowId([])).toBe(0)
+  })
+
+  it('does not assume ascending input order', () => {
+    expect(maxRowId([{ id: 5 }, { id: 130_000 }, { id: 1 }])).toBe(130_000)
   })
 })
 
