@@ -377,3 +377,115 @@ export async function rebakeDescriptors(
   }
   return { ok: errors.length === 0, rebaked, errors }
 }
+
+// ---------------------------------------------------------------------------------------------
+// T8 — switchToPostgres: the full SQLite -> Postgres orchestration. Every step above is
+// individually dependency-injected here (default: the real exported implementation), so the call
+// order / early-exit-per-stage / cleanup-on-failure logic is unit-testable with zero DB and zero
+// filesystem beyond a throwaway backendConfig.json dir — see backend-switch.test.ts. A separate
+// real-Postgres integration test (backend-switch.pg.test.ts) exercises the SAME orchestration with
+// the real testConnection/migrateTarget/assertTargetEmpty/copyData/truncateTarget (only
+// pgSecretStore swapped for a fail-once fake), proving the mid-fail -> cleanup -> retry path holds
+// against a real database, not just mocked call sequencing.
+//
+// Step order: testConnection -> migrateTarget -> assertTargetEmpty -> (copy ? copyData : skip) ->
+// pgSecretStore -> writeBackendConfig(postgres) -> rebakeDescriptors(postgres). The process itself
+// never hot-swaps its open DB handle (see the module-level comment) — a successful switch always
+// reports `needRelaunch: true` and the actual dialect flip happens on the next launch.
+// ---------------------------------------------------------------------------------------------
+
+export interface SwitchToPostgresConfig {
+  dsn: string
+  /** Copy the app's current SQLite data into the target before committing to it. false = start the
+   *  target fresh (still must be empty — assertTargetEmpty runs either way). */
+  copy: boolean
+  /** Keychain service to store the DSN under; defaults to PG_DSN_SERVICE. */
+  pgService?: string
+}
+
+export interface SwitchToPostgresDeps {
+  /** The app's current (always-sqlite-at-boot-today — see the module-level comment) DatabaseHandle.
+   *  Passed through to copyData (only read when config.copy) and to the default loadJobs. */
+  sqliteHandle: DatabaseHandle
+  migrationsPgPath: string
+  secretDeps: PgSecretDeps
+  configApp: ConfigApp
+  sqlitePath: string
+  rebake: RebakeDeps
+  /** Loads the jobs rebakeDescriptors needs to rewrite. Defaults to sqliteHandle's own repos;
+   *  overridable so an orchestration test can supply fixed fixtures without a real DB. */
+  loadJobs?: () => Promise<Pick<Job, 'id' | 'scheduleExpr' | 'command' | 'adopted'>[]>
+  // Per-step overrides (testing seam) — each defaults to the real exported implementation above.
+  testConnection?: typeof testConnection
+  migrateTarget?: typeof migrateTarget
+  assertTargetEmpty?: typeof assertTargetEmpty
+  copyData?: typeof copyData
+  pgSecretStore?: typeof pgSecretStore
+  rebakeDescriptors?: typeof rebakeDescriptors
+  truncateTarget?: typeof truncateTarget
+}
+
+export type SwitchResult = { ok: true; needRelaunch: true } | { ok: false; error: string; stage: string }
+
+export async function switchToPostgres(config: SwitchToPostgresConfig, deps: SwitchToPostgresDeps): Promise<SwitchResult> {
+  const pgService = config.pgService ?? PG_DSN_SERVICE
+  const _testConnection = deps.testConnection ?? testConnection
+  const _migrateTarget = deps.migrateTarget ?? migrateTarget
+  const _assertTargetEmpty = deps.assertTargetEmpty ?? assertTargetEmpty
+  const _copyData = deps.copyData ?? copyData
+  const _pgSecretStore = deps.pgSecretStore ?? pgSecretStore
+  const _rebakeDescriptors = deps.rebakeDescriptors ?? rebakeDescriptors
+  const _truncateTarget = deps.truncateTarget ?? truncateTarget
+  const _loadJobs = deps.loadJobs ?? (() => createRepositories(deps.sqliteHandle).jobs.list())
+
+  const test = await _testConnection(config.dsn)
+  if (!test.ok) return { ok: false, error: test.error, stage: 'testConnection' }
+
+  const mig = await _migrateTarget(config.dsn, deps.migrationsPgPath)
+  if (!mig.ok) return { ok: false, error: mig.error, stage: 'migrateTarget' }
+
+  try {
+    await _assertTargetEmpty(config.dsn)
+  } catch (err) {
+    return { ok: false, error: errMessage(err), stage: 'assertTargetEmpty' }
+  }
+
+  // Nothing has been committed to the target yet at this point (testConnection/migrateTarget only
+  // apply schema DDL, which is idempotent and not "data"; assertTargetEmpty is read-only) — every
+  // early return above needs no cleanup. `copied` gates cleanup below: once copyData has committed
+  // its transaction, a later failure must undo it (config + descriptor + target rows).
+  let copied = false
+  if (config.copy) {
+    try {
+      await _copyData(deps.sqliteHandle, config.dsn)
+      copied = true
+    } catch (err) {
+      // copyData's own transaction already rolled back on failure (T7) — the target is exactly as
+      // empty as assertTargetEmpty found it, so there is nothing here to clean up either.
+      return { ok: false, error: errMessage(err), stage: 'copyData' }
+    }
+  }
+
+  const jobs = await _loadJobs()
+  const newCfg: BackendConfigFile = { backend: 'postgres', pgService }
+  try {
+    await _pgSecretStore(pgService, config.dsn, deps.secretDeps)
+    writeBackendConfig(deps.configApp, newCfg)
+    const rebake = await _rebakeDescriptors(newCfg, deps.sqlitePath, jobs, deps.rebake)
+    if (!rebake.ok) {
+      throw new Error(`rebake failed: ${rebake.errors.map((e) => `${e.id}: ${e.error}`).join('; ')}`)
+    }
+    return { ok: true, needRelaunch: true }
+  } catch (err) {
+    if (copied) {
+      // Undo, in the same order the happy path applied them: config back to sqlite, native cron
+      // lines re-baked back to the sqlite descriptor, target rows wiped so a retry's
+      // assertTargetEmpty passes again. Best-effort past the config write (never let a cleanup
+      // failure mask the original error below).
+      writeBackendConfig(deps.configApp, { backend: 'sqlite' })
+      await _rebakeDescriptors({ backend: 'sqlite' }, deps.sqlitePath, jobs, deps.rebake).catch(() => undefined)
+      await _truncateTarget(config.dsn).catch(() => undefined)
+    }
+    return { ok: false, error: errMessage(err), stage: 'finalize' }
+  }
+}

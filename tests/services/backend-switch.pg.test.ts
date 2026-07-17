@@ -11,20 +11,27 @@
 // bootstraps its OWN throwaway Postgres DATABASE (via a maintenance connection to TEST_PG_URL) per
 // `describe` block and drops it afterwards, so this suite can never race repositories.test.ts (or a
 // future pg-touching suite) regardless of vitest's file-level parallelism.
-import { describe, it, expect, beforeAll, afterAll } from 'vitest'
+import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest'
 import { Client } from 'pg'
 import { join } from 'node:path'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import {
   testConnection,
   migrateTarget,
   assertTargetEmpty,
   TargetNotEmptyError,
   copyData,
-  truncateTarget
+  truncateTarget,
+  switchToPostgres,
+  PG_DSN_SERVICE,
+  type SwitchToPostgresDeps
 } from '../../src/main/services/backend-switch'
 import { createDatabase, type DatabaseHandle } from '../../src/main/db/client'
 import { runMigrations } from '../../src/main/db/migrate'
 import { createRepositories } from '../../src/main/db/repositories'
+import { readBackendConfig } from '../../src/main/db/backendConfig'
+import type { AdoptOptions, WriteResult } from '../../src/main/scheduler/types'
 
 const PG_MIGRATIONS = join(__dirname, '../../src/main/db/migrations.pg')
 const SQLITE_MIGRATIONS = join(__dirname, '../../src/main/db/migrations')
@@ -273,6 +280,86 @@ maybeDescribe('backend-switch.ts (real Postgres, TEST_PG_URL)', () => {
           await verify.close()
         }
       })
+    })
+  })
+
+  describe('switchToPostgres (T8, real steps except a fail-once pgSecretStore)', () => {
+    it('mid-fail after a real copy cleans up (config reverts, target truncates) and a retry with the same deps fully succeeds', async () => {
+      const sqliteHandle = createDatabase({ dialect: 'sqlite', path: ':memory:' })
+      await runMigrations(sqliteHandle, { sqlite: SQLITE_MIGRATIONS, pg: PG_MIGRATIONS })
+      const repos = createRepositories(sqliteHandle)
+      const seedJob = await repos.jobs.create({
+        name: 'seed',
+        source: 'native_cron',
+        platform: 'darwin',
+        scheduleExpr: '0 3 * * *',
+        command: '/backup.sh',
+        enabled: true,
+        adopted: true
+      })
+      await repos.runLogs.startRun({ jobId: seedJob.id, triggeredBy: 'manual' })
+
+      const configDir = mkdtempSync(join(tmpdir(), 'chronos-bswitch-t8-'))
+      const configApp = { getPath: () => configDir }
+
+      // Fake crontab adapter for rebakeDescriptors — this test is about the Postgres side (real
+      // migrate/assert/copy/truncate); the native scheduler is never actually touched in tests.
+      const adoptCalls: Array<[number, AdoptOptions]> = []
+      const adapter = {
+        unadopt: vi.fn(async (): Promise<WriteResult> => ({ ok: true })),
+        adopt: vi.fn(async (id: number, opts: AdoptOptions): Promise<WriteResult> => {
+          adoptCalls.push([id, opts])
+          return { ok: true }
+        })
+      }
+
+      await withFreshDatabase('chronos_bswitch_t8_switch', async (dsn) => {
+        let secretStoreCalls = 0
+        const deps: SwitchToPostgresDeps = {
+          sqliteHandle,
+          migrationsPgPath: PG_MIGRATIONS,
+          secretDeps: { exec: vi.fn(async () => ({ code: 1, stdout: '' })), platform: 'win32', configDir },
+          configApp,
+          sqlitePath: '/db/chronos.db',
+          rebake: { adapter, schedmgrPath: '/opt/schedmgr' },
+          // Every OTHER step is the real implementation (testConnection/migrateTarget/
+          // assertTargetEmpty/copyData/truncateTarget/rebakeDescriptors all default) — only
+          // pgSecretStore is swapped for a fake that fails exactly once, so the FIRST call
+          // exercises the real cleanup path against the real database, and the SECOND call (retry)
+          // proves assertTargetEmpty genuinely passes again post-truncate, not just per mocked
+          // orchestration logic (backend-switch.test.ts already covers that separately).
+          pgSecretStore: vi.fn(async () => {
+            secretStoreCalls++
+            if (secretStoreCalls === 1) throw new Error('transient keychain error')
+          })
+        }
+
+        const first = await switchToPostgres({ dsn, copy: true }, deps)
+        expect(first.ok).toBe(false)
+        expect(readBackendConfig(configApp)).toEqual({ backend: 'sqlite' })
+
+        // Cleanup proof: the target is genuinely empty again on the real database.
+        await expect(assertTargetEmpty(dsn)).resolves.toBeUndefined()
+
+        const second = await switchToPostgres({ dsn, copy: true }, deps)
+        expect(second).toEqual({ ok: true, needRelaunch: true })
+        expect(readBackendConfig(configApp)).toEqual({ backend: 'postgres', pgService: PG_DSN_SERVICE })
+
+        // The retry's copy landed for real.
+        const target = createDatabase({ dialect: 'postgres', dsn })
+        try {
+          const targetRepos = createRepositories(target)
+          expect((await targetRepos.jobs.get(seedJob.id))?.name).toBe('seed')
+        } finally {
+          await target.close()
+        }
+
+        // rebakeDescriptors ran against the real (now postgres) descriptor on the successful retry.
+        expect(adoptCalls.some(([id, opts]) => id === seedJob.id && opts.dbPath === `pg:keychain:${PG_DSN_SERVICE}`)).toBe(true)
+      })
+
+      await sqliteHandle.close()
+      rmSync(configDir, { recursive: true, force: true })
     })
   })
 })

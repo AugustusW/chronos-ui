@@ -1,8 +1,24 @@
 // SPDX-License-Identifier: Apache-2.0
-import { describe, it, expect, vi } from 'vitest'
-import { testConnection, rebakeDescriptors, type PgClientLike, type RebakeDeps } from '../../src/main/services/backend-switch'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import {
+  testConnection,
+  rebakeDescriptors,
+  switchToPostgres,
+  PG_DSN_SERVICE,
+  type PgClientLike,
+  type RebakeDeps,
+  type SwitchToPostgresDeps,
+  type TestConnectionResult,
+  type MigrateTargetResult,
+  type CopyDataResult,
+  type RebakeResult
+} from '../../src/main/services/backend-switch'
 import type { AdoptOptions, WriteResult } from '../../src/main/scheduler/types'
 import type { Job } from '../../src/main/db/schema'
+import { readBackendConfig } from '../../src/main/db/backendConfig'
 
 function fakeClient(over: Partial<PgClientLike> = {}): PgClientLike {
   return {
@@ -165,5 +181,169 @@ describe('rebakeDescriptors (T10, mocked adapter)', () => {
     const jobs = [job({ id: 1, scheduleExpr: '* * * * *', command: '/a.sh', adopted: true })]
     const res = await rebakeDescriptors({ backend: 'sqlite' }, '/db/chronos.db', jobs, { adapter, schedmgrPath: '/opt/schedmgr' })
     expect(res).toEqual({ ok: false, rebaked: [], errors: [{ id: 1, error: 'no matching unadopted line' }] })
+  })
+})
+
+// ---------------------------------------------------------------------------------------------
+// switchToPostgres (T8) — every step is dependency-injected (defaults to the real implementations
+// exported above, per SwitchToPostgresDeps), so the orchestration (call order, early-exit stage,
+// cleanup-on-failure) is fully testable here with no DB and no filesystem beyond a throwaway
+// backendConfig.json directory (mirrors backendConfig.test.ts's own mkdtempSync convention).
+// ---------------------------------------------------------------------------------------------
+describe('switchToPostgres (T8, mocked steps)', () => {
+  let dir: string
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'chronos-bswitch-'))
+  })
+  afterEach(() => rmSync(dir, { recursive: true, force: true }))
+
+  const configApp = () => ({ getPath: () => dir })
+  const OK_TEST: TestConnectionResult = { ok: true, version: 'PostgreSQL 16', ms: 5 }
+  const OK_MIGRATE: MigrateTargetResult = { ok: true }
+  const OK_COPY: CopyDataResult = { ok: true, counts: { jobs: 1, runLogs: 2, notifySettings: 1, notifyOutbox: 0 } }
+  const OK_REBAKE: RebakeResult = { ok: true, rebaked: [1], errors: [] }
+
+  function baseDeps(over: Partial<SwitchToPostgresDeps> = {}): SwitchToPostgresDeps {
+    const { adapter } = fakeRebakeAdapter()
+    return {
+      sqliteHandle: {} as never, // never touched unless copyData/jobs.list are NOT overridden — every scenario below overrides them
+      migrationsPgPath: '/migrations/pg',
+      secretDeps: { exec: vi.fn(async () => ({ code: 1, stdout: '' })), platform: 'win32', configDir: dir },
+      configApp: configApp(),
+      sqlitePath: '/db/chronos.db',
+      rebake: { adapter, schedmgrPath: '/opt/schedmgr' },
+      loadJobs: async () => [],
+      testConnection: vi.fn(async () => OK_TEST),
+      migrateTarget: vi.fn(async () => OK_MIGRATE),
+      assertTargetEmpty: vi.fn(async () => undefined),
+      copyData: vi.fn(async () => OK_COPY),
+      pgSecretStore: vi.fn(async () => undefined),
+      rebakeDescriptors: vi.fn(async () => OK_REBAKE),
+      truncateTarget: vi.fn(async () => undefined),
+      ...over
+    }
+  }
+
+  it('happy path with copy: runs every step in order and writes the postgres backendConfig', async () => {
+    const deps = baseDeps()
+    const res = await switchToPostgres({ dsn: 'postgresql://u:p@h/db', copy: true }, deps)
+    expect(res).toEqual({ ok: true, needRelaunch: true })
+    expect(deps.testConnection).toHaveBeenCalledWith('postgresql://u:p@h/db')
+    expect(deps.migrateTarget).toHaveBeenCalledWith('postgresql://u:p@h/db', '/migrations/pg')
+    expect(deps.assertTargetEmpty).toHaveBeenCalledWith('postgresql://u:p@h/db')
+    expect(deps.copyData).toHaveBeenCalledOnce()
+    expect(deps.pgSecretStore).toHaveBeenCalledWith(PG_DSN_SERVICE, 'postgresql://u:p@h/db', deps.secretDeps)
+    expect(deps.rebakeDescriptors).toHaveBeenCalledWith(
+      { backend: 'postgres', pgService: PG_DSN_SERVICE },
+      '/db/chronos.db',
+      [],
+      deps.rebake
+    )
+    expect(readBackendConfig(configApp())).toEqual({ backend: 'postgres', pgService: PG_DSN_SERVICE })
+    expect(deps.truncateTarget).not.toHaveBeenCalled()
+  })
+
+  it('copy:false skips copyData entirely but still finalizes', async () => {
+    const deps = baseDeps()
+    const res = await switchToPostgres({ dsn: 'postgresql://u:p@h/db', copy: false }, deps)
+    expect(res).toEqual({ ok: true, needRelaunch: true })
+    expect(deps.copyData).not.toHaveBeenCalled()
+    expect(deps.pgSecretStore).toHaveBeenCalledOnce()
+  })
+
+  it('a custom pgService overrides PG_DSN_SERVICE end-to-end', async () => {
+    const deps = baseDeps()
+    await switchToPostgres({ dsn: 'postgresql://u:p@h/db', copy: false, pgService: 'custom/svc' }, deps)
+    expect(deps.pgSecretStore).toHaveBeenCalledWith('custom/svc', 'postgresql://u:p@h/db', deps.secretDeps)
+    expect(readBackendConfig(configApp())).toEqual({ backend: 'postgres', pgService: 'custom/svc' })
+  })
+
+  it('aborts at testConnection without calling any later step', async () => {
+    const deps = baseDeps({ testConnection: vi.fn(async () => ({ ok: false, error: 'refused' })) })
+    const res = await switchToPostgres({ dsn: 'postgresql://u:p@h/db', copy: true }, deps)
+    expect(res).toEqual({ ok: false, error: 'refused', stage: 'testConnection' })
+    expect(deps.migrateTarget).not.toHaveBeenCalled()
+    expect(deps.copyData).not.toHaveBeenCalled()
+    expect(readBackendConfig(configApp())).toEqual({ backend: 'sqlite' }) // untouched (default)
+  })
+
+  it('aborts at migrateTarget without calling assertTargetEmpty/copyData/finalize', async () => {
+    const deps = baseDeps({ migrateTarget: vi.fn(async () => ({ ok: false, error: 'migration failed' })) })
+    const res = await switchToPostgres({ dsn: 'postgresql://u:p@h/db', copy: true }, deps)
+    expect(res).toEqual({ ok: false, error: 'migration failed', stage: 'migrateTarget' })
+    expect(deps.assertTargetEmpty).not.toHaveBeenCalled()
+    expect(deps.copyData).not.toHaveBeenCalled()
+  })
+
+  it('aborts at assertTargetEmpty (TargetNotEmptyError) without calling copyData/finalize', async () => {
+    const deps = baseDeps({ assertTargetEmpty: vi.fn(async () => { throw new Error('target Postgres database already has rows in: jobs') }) })
+    const res = await switchToPostgres({ dsn: 'postgresql://u:p@h/db', copy: true }, deps)
+    expect(res).toEqual({ ok: false, error: 'target Postgres database already has rows in: jobs', stage: 'assertTargetEmpty' })
+    expect(deps.copyData).not.toHaveBeenCalled()
+    expect(deps.pgSecretStore).not.toHaveBeenCalled()
+  })
+
+  it('aborts at copyData without any cleanup (nothing was ever committed — the copy transaction itself rolled back)', async () => {
+    const deps = baseDeps({ copyData: vi.fn(async () => { throw new Error('count mismatch') }) })
+    const res = await switchToPostgres({ dsn: 'postgresql://u:p@h/db', copy: true }, deps)
+    expect(res).toEqual({ ok: false, error: 'count mismatch', stage: 'copyData' })
+    expect(deps.pgSecretStore).not.toHaveBeenCalled()
+    expect(deps.truncateTarget).not.toHaveBeenCalled() // nothing to clean up — copy itself already rolled back
+  })
+
+  it('cleanup-on-failure: pgSecretStore fails AFTER a successful copy — reverts config to sqlite, re-bakes to sqlite, truncates the target', async () => {
+    const deps = baseDeps({
+      pgSecretStore: vi.fn(async () => { throw new Error('keychain + fallback file both failed') })
+    })
+    const res = await switchToPostgres({ dsn: 'postgresql://u:p@h/db', copy: true }, deps)
+    expect(res).toEqual({ ok: false, error: 'keychain + fallback file both failed', stage: 'finalize' })
+    expect(readBackendConfig(configApp())).toEqual({ backend: 'sqlite' })
+    expect(deps.rebakeDescriptors).toHaveBeenCalledWith({ backend: 'sqlite' }, '/db/chronos.db', [], deps.rebake)
+    expect(deps.truncateTarget).toHaveBeenCalledWith('postgresql://u:p@h/db')
+  })
+
+  it('cleanup-on-failure: rebakeDescriptors reports errors AFTER a successful copy — same cleanup path', async () => {
+    const deps = baseDeps({
+      rebakeDescriptors: vi
+        .fn()
+        .mockResolvedValueOnce({ ok: false, rebaked: [], errors: [{ id: 1, error: 'no matching unadopted line' }] })
+        .mockResolvedValueOnce(OK_REBAKE) // the cleanup path's own re-bake-to-sqlite call
+    })
+    const res = await switchToPostgres({ dsn: 'postgresql://u:p@h/db', copy: true }, deps)
+    expect(res.ok).toBe(false)
+    if (!res.ok) {
+      expect(res.stage).toBe('finalize')
+      expect(res.error).toContain('no matching unadopted line')
+    }
+    expect(readBackendConfig(configApp())).toEqual({ backend: 'sqlite' })
+    expect(deps.truncateTarget).toHaveBeenCalledOnce()
+  })
+
+  it('cleanup-on-failure does NOT run when copy:false (nothing was ever copied into the target to clean up)', async () => {
+    const deps = baseDeps({
+      pgSecretStore: vi.fn(async () => { throw new Error('boom') })
+    })
+    const res = await switchToPostgres({ dsn: 'postgresql://u:p@h/db', copy: false }, deps)
+    expect(res).toEqual({ ok: false, error: 'boom', stage: 'finalize' })
+    expect(deps.truncateTarget).not.toHaveBeenCalled()
+    // config/descriptor cleanup still doesn't need to run (they were never advanced past sqlite either).
+    expect(readBackendConfig(configApp())).toEqual({ backend: 'sqlite' })
+  })
+
+  it('retry after cleanup succeeds: a mid-fail then a second call with the same (now-working) deps completes', async () => {
+    let calls = 0
+    const deps = baseDeps({
+      pgSecretStore: vi.fn(async () => {
+        calls++
+        if (calls === 1) throw new Error('transient keychain error')
+      })
+    })
+    const first = await switchToPostgres({ dsn: 'postgresql://u:p@h/db', copy: true }, deps)
+    expect(first.ok).toBe(false)
+    expect(readBackendConfig(configApp())).toEqual({ backend: 'sqlite' })
+
+    const second = await switchToPostgres({ dsn: 'postgresql://u:p@h/db', copy: true }, deps)
+    expect(second).toEqual({ ok: true, needRelaunch: true })
+    expect(readBackendConfig(configApp())).toEqual({ backend: 'postgres', pgService: PG_DSN_SERVICE })
   })
 })
