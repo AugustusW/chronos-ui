@@ -7,10 +7,12 @@ import {
   testConnection,
   rebakeDescriptors,
   switchToPostgres,
+  switchToSqlite,
   PG_DSN_SERVICE,
   type PgClientLike,
   type RebakeDeps,
   type SwitchToPostgresDeps,
+  type SwitchToSqliteDeps,
   type TestConnectionResult,
   type MigrateTargetResult,
   type CopyDataResult,
@@ -345,5 +347,59 @@ describe('switchToPostgres (T8, mocked steps)', () => {
     const second = await switchToPostgres({ dsn: 'postgresql://u:p@h/db', copy: true }, deps)
     expect(second).toEqual({ ok: true, needRelaunch: true })
     expect(readBackendConfig(configApp())).toEqual({ backend: 'postgres', pgService: PG_DSN_SERVICE })
+  })
+})
+
+// ---------------------------------------------------------------------------------------------
+// switchToSqlite (T9) — the reverse of switchToPostgres, but much simpler: it never touches the
+// Postgres target at all (spec: "不動 PG 資料") — just flips backendConfig.json back to sqlite and
+// re-bakes every adopted job's --db back to the plain sqlite file path.
+// ---------------------------------------------------------------------------------------------
+describe('switchToSqlite (T9, mocked steps)', () => {
+  let dir: string
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'chronos-bswitch-sqlite-'))
+  })
+  afterEach(() => rmSync(dir, { recursive: true, force: true }))
+
+  const configApp = () => ({ getPath: () => dir })
+
+  function baseDeps(over: Partial<SwitchToSqliteDeps> = {}): SwitchToSqliteDeps {
+    const { adapter } = fakeRebakeAdapter()
+    return {
+      sqliteHandle: {} as never, // unused unless loadJobs is NOT overridden
+      configApp: configApp(),
+      sqlitePath: '/db/chronos.db',
+      rebake: { adapter, schedmgrPath: '/opt/schedmgr' },
+      loadJobs: async () => [],
+      rebakeDescriptors: vi.fn(async () => ({ ok: true, rebaked: [], errors: [] }) as RebakeResult),
+      ...over
+    }
+  }
+
+  it('writes the sqlite backendConfig and re-bakes every adopted job back to the plain file path', async () => {
+    const deps = baseDeps({ loadJobs: async () => [job({ id: 1, scheduleExpr: '* * * * *', command: '/x.sh', adopted: true })] })
+    const res = await switchToSqlite(deps)
+    expect(res).toEqual({ ok: true, needRelaunch: true })
+    expect(readBackendConfig(configApp())).toEqual({ backend: 'sqlite' })
+    expect(deps.rebakeDescriptors).toHaveBeenCalledWith(
+      { backend: 'sqlite' },
+      '/db/chronos.db',
+      [job({ id: 1, scheduleExpr: '* * * * *', command: '/x.sh', adopted: true })],
+      deps.rebake
+    )
+  })
+
+  it('surfaces a rebake failure without throwing (config is already correctly sqlite either way)', async () => {
+    const deps = baseDeps({
+      rebakeDescriptors: vi.fn(async () => ({ ok: false, rebaked: [], errors: [{ id: 1, error: 'no matching unadopted line' }] }))
+    })
+    const res = await switchToSqlite(deps)
+    expect(res.ok).toBe(false)
+    if (!res.ok) {
+      expect(res.stage).toBe('rebake')
+      expect(res.error).toContain('no matching unadopted line')
+    }
+    expect(readBackendConfig(configApp())).toEqual({ backend: 'sqlite' })
   })
 })

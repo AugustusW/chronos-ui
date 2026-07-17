@@ -489,3 +489,42 @@ export async function switchToPostgres(config: SwitchToPostgresConfig, deps: Swi
     return { ok: false, error: errMessage(err), stage: 'finalize' }
   }
 }
+
+// ---------------------------------------------------------------------------------------------
+// T9 — switchToSqlite: the reverse direction. Much simpler than switchToPostgres — it never
+// connects to (or otherwise touches) the Postgres target at all: just writes the sqlite
+// backendConfig and re-bakes every adopted job's --db back to the plain sqlite file path. Any
+// existing Postgres data is left exactly as it was (a later switchToPostgres with copy:false can
+// resume using it, since it's still there and — if it's the SAME target the app just switched
+// away from — still populated, which assertTargetEmpty would then correctly refuse to touch again
+// without an explicit truncate; that resume story is a future UI concern, not this function's).
+// ---------------------------------------------------------------------------------------------
+
+export interface SwitchToSqliteDeps {
+  /** The app's current DatabaseHandle (always sqlite at boot today — see the module-level
+   *  comment), used by the default loadJobs. */
+  sqliteHandle: DatabaseHandle
+  configApp: ConfigApp
+  sqlitePath: string
+  rebake: RebakeDeps
+  loadJobs?: () => Promise<Pick<Job, 'id' | 'scheduleExpr' | 'command' | 'adopted'>[]>
+  rebakeDescriptors?: typeof rebakeDescriptors
+}
+
+export async function switchToSqlite(deps: SwitchToSqliteDeps): Promise<SwitchResult> {
+  const _rebakeDescriptors = deps.rebakeDescriptors ?? rebakeDescriptors
+  const _loadJobs = deps.loadJobs ?? (() => createRepositories(deps.sqliteHandle).jobs.list())
+
+  const jobs = await _loadJobs()
+  const sqliteCfg: BackendConfigFile = { backend: 'sqlite' }
+  writeBackendConfig(deps.configApp, sqliteCfg)
+  const rebake = await _rebakeDescriptors(sqliteCfg, deps.sqlitePath, jobs, deps.rebake)
+  if (!rebake.ok) {
+    // Nothing to roll back: the config is already (correctly) sqlite either way, and any job that
+    // WAS re-baked successfully is already correctly pointing at the sqlite path — only the
+    // failed ones are stuck on their old descriptor, and a retry of switchToSqlite alone (no
+    // Postgres involvement) is enough to catch them.
+    return { ok: false, error: `rebake failed: ${rebake.errors.map((e) => `${e.id}: ${e.error}`).join('; ')}`, stage: 'rebake' }
+  }
+  return { ok: true, needRelaunch: true }
+}
