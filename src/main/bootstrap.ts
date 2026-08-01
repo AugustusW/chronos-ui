@@ -13,6 +13,7 @@ import { createAdapter } from './scheduler/factory'
 import { resolveSchedmgrPath } from './scheduler/schedmgr-path'
 import { makeCrontabExec, makePowerShellExec, type ExecFn } from './scheduler'
 import { createJobsService } from './services/jobs.service'
+import { createDashboardService } from './services/dashboard.service'
 import { createNotifyService } from './services/notify.service'
 import { goSecretDir } from './services/notify-secret'
 import { keychainWriteSupported, type ExecFn as KeychainExecFn } from './services/notify-keychain'
@@ -200,6 +201,10 @@ export async function buildMainDeps(app: App, opts: BuildOpts = {}): Promise<Bui
   // been completed and boot picks it up per the branch above).
   const repos = createRepositories(handle)
 
+  // Task 5: dashboard summary service — reuses the SAME `repos` this boot already assembled (no
+  // separate repository set per dialect).
+  const dashboard = createDashboardService({ repos })
+
   // The schedmgr `--db` descriptor is DISTINCT from the GUI's own db path: postgres →
   // "pg:keychain:<service>" (schedmgr resolves the DSN from the keychain; the crontab carries no
   // secret), sqlite → the path. Boot config defaults to sqlite, so by default this equals dbPath.
@@ -328,7 +333,8 @@ export async function buildMainDeps(app: App, opts: BuildOpts = {}): Promise<Bui
     pgGetStatus,
     drainDb,
     relaunchApp: opts.relaunchApp ?? (() => {}),
-    exitApp: opts.exitApp ?? (() => {})
+    exitApp: opts.exitApp ?? (() => {}),
+    dashboardSummary: () => dashboard.getSummary()
   }
   const pruneRunLogs = (cutoff: Date): Promise<number> => repos.runLogs.pruneOlderThan(cutoff)
 

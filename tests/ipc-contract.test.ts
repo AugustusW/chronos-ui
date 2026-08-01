@@ -57,3 +57,9 @@ describe('Bolt 4 pg status IPC channel (T15)', () => {
     expect(s.activeBackend).toBe('postgres')
   })
 })
+
+describe('Dashboard IPC channel (Task 5)', () => {
+  it('declares the dashboard summary channel', () => {
+    expect(IPC.dashboardSummary).toBe('dashboard:summary')
+  })
+})

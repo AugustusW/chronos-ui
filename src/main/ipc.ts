@@ -2,7 +2,7 @@
 import { ipcMain } from 'electron'
 import { IPC, type AppVersion } from '../shared/ipc-contract'
 import { isNotifyTokenFormat, isChatIdFormat } from '../shared/notify-validation'
-import type { CreateJobInput, UpdateJobChanges, AdoptItem, ReconcileResult, RunNowResult, PgDsnParts, PgSaveSwitchInput, PgSaveSwitchResult, PgStatus } from '../shared/ipc-contract'
+import type { CreateJobInput, UpdateJobChanges, AdoptItem, ReconcileResult, RunNowResult, PgDsnParts, PgSaveSwitchInput, PgSaveSwitchResult, PgStatus, DashboardSummary } from '../shared/ipc-contract'
 import type { JobsService } from './services/jobs.service'
 import type { NotifyService, NotifySaveInput } from './services/notify.service'
 import type { RunLog } from './db/schema'
@@ -41,6 +41,7 @@ export interface IpcDeps {
    *  ran. */
   relaunchApp: () => void
   exitApp: () => void
+  dashboardSummary: () => Promise<DashboardSummary>
 }
 
 export function handleGetVersion(meta: { name: string; version: string }): AppVersion {
@@ -241,6 +242,13 @@ export async function handlePgGetStatus(deps: IpcDeps): Promise<PgStatus> {
   return deps.pgGetStatus()
 }
 
+// Task 5 — dashboard summary: a thin pass-through (same shape as handlePgGetStatus above), kept as
+// its own named handler per this file's "every channel gets a named handler" convention rather than
+// inlined into registerIpcHandlers.
+export function handleDashboardSummary(deps: IpcDeps): Promise<DashboardSummary> {
+  return deps.dashboardSummary()
+}
+
 export function registerIpcHandlers(deps: IpcDeps): void {
   ipcMain.handle(IPC.appGetVersion, () => handleGetVersion(deps.meta))
   ipcMain.handle(IPC.jobsList, () => handleJobsList(deps))
@@ -265,4 +273,5 @@ export function registerIpcHandlers(deps: IpcDeps): void {
   ipcMain.handle(IPC.pgTestConnection, (_e, p) => handlePgTestConnection(deps, p))
   ipcMain.handle(IPC.pgSaveSwitch, (_e, p) => handlePgSaveSwitch(deps, p))
   ipcMain.handle(IPC.pgGetStatus, () => handlePgGetStatus(deps))
+  ipcMain.handle(IPC.dashboardSummary, () => handleDashboardSummary(deps))
 }

@@ -143,5 +143,34 @@ for (const backend of backends) {
       expect(remaining.map((r) => r.id)).toEqual([recent.id])
       expect(remaining.map((r) => r.id)).not.toContain(old.id)
     })
+
+    // Final review #5/T4: dashboard.repository.test.ts (sqlite) already covers these functions
+    // directly, but never through Repositories.dashboard — so the pg implementation
+    // (dashboard.repository.pg.ts) had zero test coverage even under `TEST_PG_URL`. Running this
+    // through the shared backend loop closes that gap for the pg lane (sqlite gets it too, as a
+    // bonus — no harm, since it's the same fixture/interface both dialects share).
+    it('dashboard repo: countsSince/listFailuresSince/countFailuresSince/countActiveJobs agree on a small fixture', async () => {
+      const active = await repos.jobs.create({ ...baseJob, enabled: true, adopted: true })
+      // Created only for its side effect — enabled-but-unadopted must not count as "active".
+      await repos.jobs.create({ ...baseJob, enabled: true, adopted: false })
+      const since = new Date(Date.now() - 60_000)
+
+      const ok = await repos.runLogs.startRun({ jobId: active.id, triggeredBy: 'schedule', startedAt: new Date() })
+      await repos.runLogs.finishRun(ok.id, { result: 'success', exitCode: 0 })
+      const bad = await repos.runLogs.startRun({ jobId: active.id, triggeredBy: 'schedule', startedAt: new Date() })
+      await repos.runLogs.finishRun(bad.id, { result: 'failure', exitCode: 1 })
+      // In-progress run (result still NULL) must not count toward any aggregate.
+      await repos.runLogs.startRun({ jobId: active.id, triggeredBy: 'schedule', startedAt: new Date() })
+
+      expect(await repos.dashboard.countsSince(since)).toEqual({ runs: 2, succeeded: 1, failed: 1 })
+
+      const failures = await repos.dashboard.listFailuresSince(since, 20)
+      expect(failures.map((f) => f.jobId)).toEqual([active.id])
+      expect(failures[0].result).toBe('failure')
+
+      expect(await repos.dashboard.countFailuresSince(since)).toBe(1)
+      // active job (enabled+adopted) counts; inactive (enabled but not adopted) does not.
+      expect(await repos.dashboard.countActiveJobs()).toBe(1)
+    })
   })
 }

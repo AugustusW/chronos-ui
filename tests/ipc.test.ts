@@ -1,9 +1,10 @@
 import { describe, it, expect, vi } from 'vitest'
 import {
   handleGetVersion, handleJobsCreate, handleJobsUpdate, handleJobsAdopt, handleJobsRunNowStreaming, handleJobsRunBatchCancel, handleRunsRecent, handleNotifySave,
-  handlePgTestConnection, handlePgSaveSwitch, handlePgGetStatus,
+  handlePgTestConnection, handlePgSaveSwitch, handlePgGetStatus, handleDashboardSummary,
   MAX_BATCH_ADOPT, MAX_RUN_LIST_LIMIT, type IpcDeps
 } from '../src/main/ipc'
+import type { DashboardSummary } from '../src/shared/ipc-contract'
 import { buildDsn, type PgDsnParts } from '../src/main/services/pg-dsn'
 
 describe('handleGetVersion', () => {
@@ -13,6 +14,11 @@ describe('handleGetVersion', () => {
     expect(result.version).toMatch(/^\d+\.\d+\.\d+/)
   })
 })
+
+const fakeDashboardSummary: DashboardSummary = {
+  runsToday: 0, succeededToday: 0, failedToday: 0, activeJobs: 0,
+  failures: [], failuresTotal: 0, upcoming: [], generatedAt: 0
+}
 
 const deps = (over: Partial<IpcDeps> = {}): IpcDeps => ({
   meta: { name: 'chronos-ui', version: '0.1.0' },
@@ -34,6 +40,7 @@ const deps = (over: Partial<IpcDeps> = {}): IpcDeps => ({
   drainDb: async () => {},
   relaunchApp: () => {},
   exitApp: () => {},
+  dashboardSummary: async () => fakeDashboardSummary,
   ...over
 })
 
@@ -360,5 +367,14 @@ describe('handlePgGetStatus (T15)', () => {
     const d = deps({ pgGetStatus: async () => ({ activeBackend: 'postgres', keychainAvailable: false }) })
     const r = await handlePgGetStatus(d)
     expect(r).toEqual({ activeBackend: 'postgres', keychainAvailable: false })
+  })
+})
+
+describe('handleDashboardSummary (Task 5)', () => {
+  it('delegates straight to deps.dashboardSummary', async () => {
+    const summary: DashboardSummary = { ...fakeDashboardSummary, runsToday: 7, generatedAt: 12345 }
+    const d = deps({ dashboardSummary: async () => summary })
+    const r = await handleDashboardSummary(d)
+    expect(r).toEqual(summary)
   })
 })

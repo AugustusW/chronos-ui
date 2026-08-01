@@ -53,6 +53,7 @@ vim, repeat                       read the run history
 
 ## Features
 
+- ✓ Dashboard home: today's stats, failures, and upcoming runs at a glance
 - ✓ Discover the cron / Task Scheduler jobs you already have
 - ✓ Adopt them without migration (no new daemon, fully reversible)
 - ✓ Run any job on demand

@@ -61,4 +61,10 @@ describe('preload chronos api', () => {
     const api = exposed.chronos as Record<string, unknown>
     expect(typeof api.pgGetStatus).toBe('function')
   })
+
+  it('exposes the dashboard summary method (Task 5)', async () => {
+    await import('../src/preload/index')
+    const api = exposed.chronos as Record<string, unknown>
+    expect(typeof api.dashboardSummary).toBe('function')
+  })
 })

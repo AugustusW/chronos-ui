@@ -6,6 +6,13 @@ All notable changes to ChronosUI are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-08-01
+
+### Added
+- Dashboard: a new home view showing today's run stats at a glance (runs / succeeded / failed /
+  active jobs, in your local timezone), the day's failures with one-click jump into the job, and
+  the next 20 upcoming runs computed from your schedules. Schedules moved to its own nav entry.
+
 ## [0.2.0] — 2026-07-18
 
 ### Added

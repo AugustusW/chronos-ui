@@ -1,0 +1,1 @@
+CREATE INDEX IF NOT EXISTS "run_logs_startedAt_result_idx" ON "run_logs" USING btree ("startedAt","result");

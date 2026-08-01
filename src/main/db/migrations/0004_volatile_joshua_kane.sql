@@ -1,0 +1,1 @@
+CREATE INDEX `run_logs_startedAt_result_idx` ON `run_logs` (`startedAt`,`result`);

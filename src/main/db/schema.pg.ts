@@ -46,7 +46,10 @@ export const runLogs = pgTable('run_logs', {
 }, (t) => ({
   // Mirrors schema.ts: composite index for listRunsForJob / getLatestRun
   // (WHERE jobId=? ORDER BY startedAt DESC, id DESC) + the retention DELETE (review #4).
-  jobStartedIdx: index('run_logs_jobId_startedAt_id_idx').on(t.jobId, t.startedAt, t.id)
+  jobStartedIdx: index('run_logs_jobId_startedAt_id_idx').on(t.jobId, t.startedAt, t.id),
+  // Dashboard's today-window aggregates (WHERE startedAt >= ? [AND result IN …]) carry no jobId,
+  // so the composite above never serves them; this one does (architect HIGH-2, dashboard spec).
+  startedResultIdx: index('run_logs_startedAt_result_idx').on(t.startedAt, t.result)
 }))
 
 export const notifySettings = pgTable('notify_settings', {

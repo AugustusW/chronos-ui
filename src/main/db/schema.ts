@@ -52,7 +52,10 @@ export const runLogs = sqliteTable('run_logs', {
   // WHERE jobId=? ORDER BY startedAt DESC, id DESC. An ASC index serves the DESC order via a reverse
   // scan, and also bounds the retention DELETE (… WHERE startedAt < cutoff). Neither SQLite nor pg
   // auto-indexes a referencing FK column, so without this both backends full-scan + sort (review #4).
-  jobStartedIdx: index('run_logs_jobId_startedAt_id_idx').on(t.jobId, t.startedAt, t.id)
+  jobStartedIdx: index('run_logs_jobId_startedAt_id_idx').on(t.jobId, t.startedAt, t.id),
+  // Dashboard's today-window aggregates (WHERE startedAt >= ? [AND result IN …]) carry no jobId,
+  // so the composite above never serves them; this one does (architect HIGH-2, dashboard spec).
+  startedResultIdx: index('run_logs_startedAt_result_idx').on(t.startedAt, t.result)
 }))
 
 export const notifySettings = sqliteTable('notify_settings', {

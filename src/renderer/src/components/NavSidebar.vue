@@ -3,7 +3,8 @@
 import { ref, onMounted } from 'vue'
 import ThemeToggle from './ThemeToggle.vue'
 const items = [
-  { to: '/', icon: '▤', label: 'Schedules' },
+  { to: '/', icon: '▦', label: 'Dashboard' },
+  { to: '/schedules', icon: '▤', label: 'Schedules' },
   { to: '/history', icon: '≡', label: 'Run History' },
   { to: '/settings', icon: '⚙', label: 'Settings' }
 ]

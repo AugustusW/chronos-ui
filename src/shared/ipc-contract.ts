@@ -28,7 +28,11 @@ export const IPC = {
   jobsManagedCount: 'jobs:managedCount',
   pgTestConnection: 'pg:testConnection',
   pgSaveSwitch: 'pg:saveSwitch',
-  pgGetStatus: 'pg:getStatus'
+  pgGetStatus: 'pg:getStatus',
+  // dashboard:summary intentionally aggregates the whole page's read model in one invoke (single
+  // fetch per view). Do NOT treat this as precedent for stuffing unrelated concerns into one
+  // channel; a future trend-chart endpoint gets its own channel (architect LOW-2).
+  dashboardSummary: 'dashboard:summary'
 } as const
 
 export interface AppVersion {
@@ -116,3 +120,4 @@ export interface PgStatus {
 export type { Job, RunLog, ParsedJob, BatchWriteResult, WriteResult }
 export type { NotifySettingsDTO, NotifySaveInput, SaveResult } from '../main/services/notify.service'
 export type { PgDsnParts, TestConnectionResult }
+export type { DashboardSummary, UpcomingRow } from '../main/services/dashboard.service'
