@@ -6,6 +6,16 @@ All notable changes to ChronosUI are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-08-11
+
+### Added
+- Tray menu now shows a live Dashboard summary: today's succeeded/failed counts, up to 5 recent
+  failed jobs (click one to open the app), and the next upcoming run — no more digging through the
+  window just to check whether anything broke overnight. The menu bar icon itself (macOS) picks up
+  a compact "✓N ✗N" status once there's at least one failure today, and stays quiet the rest of the
+  time. Refreshes on every run outcome / schedule change, plus a best-effort refresh right before
+  the menu opens.
+
 ## [0.3.0] — 2026-08-01
 
 ### Added
