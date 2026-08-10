@@ -10,6 +10,7 @@ import { watchDbForChanges } from './db/watch'
 import type { DatabaseHandle } from './db/client'
 import { createTray, type TrayHandle } from './tray'
 import { installNavigationHardening } from './window-security'
+import type { RunEvent } from '../shared/ipc-contract'
 
 // Install crash guards as early as possible: a stray uncaught error in main must surface a visible,
 // debuggable dialog (ChronosUI is a developer tool) rather than silently quitting the app.
@@ -55,7 +56,12 @@ app.whenReady().then(async () => {
   const bootOpts = {
     getWebContents: () => BrowserWindow.getAllWindows()[0]?.webContents,
     relaunchApp: () => app.relaunch(),
-    exitApp: () => app.exit()
+    exitApp: () => app.exit(),
+    // v0.4.0: fan the SAME RunEvent stream the renderer gets out to the tray too (tray isn't
+    // created yet at this point in boot — `tray` is a module-scope `let`, so this closure sees
+    // whatever it's assigned to by the time an event actually fires, same as the tray?.destroy()
+    // pattern already used in the before-quit handler below).
+    onRunEvent: (e: RunEvent) => tray?.applyRunEvent(e)
   }
   let built: BuiltDeps
   try {
@@ -89,7 +95,12 @@ app.whenReady().then(async () => {
     onQuit: () => { isQuitting = true; app.quit() },
     // Monochrome menu-bar template (#5): the "…Template" filename makes Electron auto-render it for
     // light/dark menu bars. NOT the full color app icon (which renders oversized + wrong in the tray).
-    iconPath: app.isPackaged ? join(process.resourcesPath, 'trayTemplate.png') : join(__dirname, '../../build/trayTemplate.png')
+    iconPath: app.isPackaged ? join(process.resourcesPath, 'trayTemplate.png') : join(__dirname, '../../build/trayTemplate.png'),
+    // v0.4.0: reuses dashboard.service.ts's query functions via the SAME bootstrap.ts-assembled
+    // deps the IPC handler calls — no separate SQL/logic. Deep-nav into run history isn't wired
+    // (see tray-menu.ts's onOpenJob doc); opening the window onto the Dashboard is enough.
+    getSummary: built.deps.dashboardSummary,
+    onOpenJob: () => showWin()
   })
   stopWatch = watchDbForChanges(built.dbPath, () => built.emit({ kind: 'jobsChanged' }))
   poll = setInterval(() => built.emit({ kind: 'jobsChanged' }), 45_000)

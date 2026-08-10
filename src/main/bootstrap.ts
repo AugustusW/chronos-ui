@@ -75,6 +75,13 @@ export interface BuildOpts {
    *  supply them. */
   relaunchApp?: () => void
   exitApp?: () => void
+  /** v0.4.0: a second consumer of every RunEvent this boot's `emit` fans out — wired by index.ts
+   *  to the tray's `applyRunEvent`, alongside the primary renderer webContents sink below. Mirrors
+   *  the renderer's own composite fan-out (src/renderer/src/main.ts's startRunEventBridge callback
+   *  drives both scheduleStore.applyRunEvent and dashboardStore.applyRunEvent from the same single
+   *  IPC subscription) — this is the main-process side of that same pattern. Optional so every
+   *  existing caller (tests, non-Electron callers) is unaffected. */
+  onRunEvent?: (e: RunEvent) => void
 }
 
 export interface BuiltDeps {
@@ -272,7 +279,16 @@ export async function buildMainDeps(app: App, opts: BuildOpts = {}): Promise<Bui
     })
   })
 
-  const emit = makeRunEmitter(opts.getWebContents ?? (() => undefined))
+  // The single RunEvent construction point for this whole boot: every started/output/finished/
+  // jobsChanged event that runNowStreaming/batch-run/index.ts's file-watch poll produce flows
+  // through this ONE function. sendToRenderer is the pre-existing (Plan 6) webContents sink;
+  // opts.onRunEvent is the v0.4.0 tray hook layered alongside it — same event, same fan-out point,
+  // no separate subscription machinery needed.
+  const sendToRenderer = makeRunEmitter(opts.getWebContents ?? (() => undefined))
+  const emit = (e: RunEvent): void => {
+    sendToRenderer(e)
+    opts.onRunEvent?.(e)
+  }
 
   const runNowStreaming = (id: number): Promise<void> =>
     runStreamingImpl(id, {

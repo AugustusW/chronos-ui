@@ -57,6 +57,29 @@ describe('buildMainDeps', () => {
     expect(built.dbPath).toBe(':memory:')
     await built.handle.close()
   })
+  it('v0.4.0: built.emit fans every RunEvent out to BOTH the renderer webContents sink and the optional onRunEvent hook (index.ts wires the tray here)', async () => {
+    const send = vi.fn()
+    const onRunEvent = vi.fn()
+    const built = await buildMainDeps(fakeApp, {
+      exec, platform: 'darwin', appRoot: APP_ROOT, resourcesPath: '/x', dbPath: ':memory:',
+      getWebContents: () => ({ isDestroyed: () => false, send }) as never,
+      onRunEvent
+    })
+    built.emit({ kind: 'jobsChanged' })
+    expect(send).toHaveBeenCalledWith('run:event', { kind: 'jobsChanged' })
+    expect(onRunEvent).toHaveBeenCalledWith({ kind: 'jobsChanged' })
+    await built.handle.close()
+  })
+  it('onRunEvent is optional — omitting it leaves the renderer sink working as before', async () => {
+    const send = vi.fn()
+    const built = await buildMainDeps(fakeApp, {
+      exec, platform: 'darwin', appRoot: APP_ROOT, resourcesPath: '/x', dbPath: ':memory:',
+      getWebContents: () => ({ isDestroyed: () => false, send }) as never
+    })
+    expect(() => built.emit({ kind: 'jobsChanged' })).not.toThrow()
+    expect(send).toHaveBeenCalledWith('run:event', { kind: 'jobsChanged' })
+    await built.handle.close()
+  })
 })
 
 describe('buildMainDeps schedmgr descriptor (postgres backend config)', () => {
