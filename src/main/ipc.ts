@@ -162,6 +162,7 @@ function isNotifyInput(p: unknown): p is NotifySaveInput {
   // so a format check only applies to a non-empty token string.
   return typeof o.enabled === 'boolean' && (o.chatId === null || isChatId(o.chatId)) && isWindow(o.windowMin) &&
     (o.includeStderr === undefined || typeof o.includeStderr === 'boolean') &&
+    (o.nativeEnabled === undefined || typeof o.nativeEnabled === 'boolean') &&
     (o.token === undefined || o.token === '' || isNotifyToken(o.token))
 }
 export async function handleNotifyGet(deps: IpcDeps) { return deps.notify.getSettings() }

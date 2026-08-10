@@ -5,7 +5,7 @@ import { homedir } from 'node:os'
 import { join, dirname } from 'node:path'
 import type { DatabaseHandle } from './db/client'
 import { openAndMigrate, drainPgHandle } from './db/lifecycle'
-import { createRepositories } from './db/repositories'
+import { createRepositories, type RunOutcomeRow } from './db/repositories'
 import { readBackendConfig } from './db/backendConfig'
 import { schedmgrDbDescriptor } from './scheduler/descriptor'
 import { resolveDbPath, resolveMigrationsPaths, type AppPaths } from './db/paths'
@@ -94,6 +94,9 @@ export interface BuiltDeps {
   schedmgrDescriptor: string
   /** Prune run_logs older than `cutoff` (wired to the active dialect's repo) — used by the retention sweep. */
   pruneRunLogs: (cutoff: Date) => Promise<number>
+  /** v0.4.0: native-notify.service.ts's poll query, wired to the active dialect's repo — main-process
+   *  internal only (not part of `deps`/IpcDeps, which is the renderer-facing IPC surface). */
+  listRunOutcomesSince: (since: Date, limit: number) => Promise<RunOutcomeRow[]>
 }
 
 /** T12: the two buttons offered by the "Database unreachable" dialog, in showMessageBox order
@@ -353,6 +356,8 @@ export async function buildMainDeps(app: App, opts: BuildOpts = {}): Promise<Bui
     dashboardSummary: () => dashboard.getSummary()
   }
   const pruneRunLogs = (cutoff: Date): Promise<number> => repos.runLogs.pruneOlderThan(cutoff)
+  const listRunOutcomesSince = (since: Date, limit: number): Promise<RunOutcomeRow[]> =>
+    repos.dashboard.listRunOutcomesSince(since, limit)
 
-  return { deps, handle, emit, dbPath, schedmgrDescriptor, pruneRunLogs }
+  return { deps, handle, emit, dbPath, schedmgrDescriptor, pruneRunLogs, listRunOutcomesSince }
 }

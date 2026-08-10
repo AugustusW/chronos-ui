@@ -30,6 +30,13 @@ describe('notify schema', () => {
     expect(row).toMatchObject({ enabled: true, chatId: '123', windowMin: 5 })
   })
 
+  it('notify_settings.nativeEnabled defaults to true when omitted (v0.4.0)', () => {
+    const { db } = freshDb()
+    db.insert(schema.notifySettings).values({ id: 1, enabled: false, chatId: null, windowMin: 0 }).run()
+    const row = db.select().from(schema.notifySettings).where(eq(schema.notifySettings.id, 1)).get()
+    expect(row?.nativeEnabled).toBe(true)
+  })
+
   it('notify_outbox holds a pending failure and cascades on job delete', () => {
     const { db } = freshDb()
     const job = db.insert(schema.jobs).values({

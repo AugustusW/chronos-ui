@@ -79,6 +79,8 @@ async function confirmSwitch(): Promise<void> {
     </section>
     <section>
       <h2>Notifications (Telegram)</h2>
+      <label class="row"><input v-model="n.nativeEnabled" data-test="notify-native-enable" type="checkbox" /> Native failure notifications</label>
+      <div class="row muted">A macOS notification when a scheduled job fails — independent of Telegram below, and only for background runs (not ones you start manually, since you're already watching those).</div>
       <label class="row"><input v-model="n.enabled" data-test="notify-enable" type="checkbox" /> Enable Telegram notifications</label>
       <label class="row">Bot token <input v-model="n.token" data-test="notify-token" type="password" :placeholder="n.tokenSet ? '•••••• (saved)' : 'paste bot token'" /></label>
       <div v-if="n.tokenStorage === 'file'" class="row warn" data-test="notify-token-storage-warn">⚠️ This token is stored unencrypted on disk (your OS keychain is unavailable on this platform). Anyone with access to your user account can read it.</div>

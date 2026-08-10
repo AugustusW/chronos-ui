@@ -10,10 +10,11 @@ import { createPgDashboardRepo } from './dashboard.repository.pg'
 import { createSqliteNotifySettingsRepo, type NotifySettingsRepo } from './notifySettings.repository'
 import { createPgNotifySettingsRepo } from './notifySettings.repository.pg'
 
-// FailureRow is defined in dashboard.repository.ts (not here) to avoid a repositories.ts ↔
-// dashboard.repository.ts circular import; re-exported so consumers only need this module.
-import type { FailureRow } from './dashboard.repository'
-export type { FailureRow }
+// FailureRow / RunOutcomeRow are defined in dashboard.repository.ts (not here) to avoid a
+// repositories.ts ↔ dashboard.repository.ts circular import; re-exported so consumers only need
+// this module.
+import type { FailureRow, RunOutcomeRow } from './dashboard.repository'
+export type { FailureRow, RunOutcomeRow }
 
 type RunResult = 'success' | 'failure' | 'timeout'
 type TriggeredBy = 'schedule' | 'manual'
@@ -49,6 +50,9 @@ export interface DashboardRepo {
   listFailuresSince(since: Date, limit: number): Promise<FailureRow[]>
   countFailuresSince(since: Date): Promise<number>
   countActiveJobs(): Promise<number> // enabled AND adopted
+  /** v0.4.0: native-notify.service.ts's poll query — completed runs (any result) since the last
+   *  watermark; see RunOutcomeRow's doc comment for why this isn't pre-filtered to failures. */
+  listRunOutcomesSince(since: Date, limit: number): Promise<RunOutcomeRow[]>
 }
 
 export interface Repositories {
@@ -86,7 +90,8 @@ function sqliteRepos(db: SqliteDb): Repositories {
       countsSince: async (since) => sd.countsSince(db, since),
       listFailuresSince: async (since, limit) => sd.listFailuresSince(db, since, limit),
       countFailuresSince: async (since) => sd.countFailuresSince(db, since),
-      countActiveJobs: async () => sd.countActiveJobs(db)
+      countActiveJobs: async () => sd.countActiveJobs(db),
+      listRunOutcomesSince: async (since, limit) => sd.listRunOutcomesSince(db, since, limit)
     }
   }
 }

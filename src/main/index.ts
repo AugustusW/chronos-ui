@@ -9,6 +9,7 @@ import { startCheckpointTimer, startRetentionSweep, pgQuitDrain } from './db/lif
 import { watchDbForChanges } from './db/watch'
 import type { DatabaseHandle } from './db/client'
 import { createTray, type TrayHandle } from './tray'
+import { createNativeNotifyService, createElectronNotifier, type NativeNotifyHandle } from './services/native-notify.service'
 import { installNavigationHardening } from './window-security'
 import type { RunEvent } from '../shared/ipc-contract'
 
@@ -22,6 +23,7 @@ let stopRetention: (() => void) | null = null
 let stopWatch: (() => void) | null = null
 let poll: ReturnType<typeof setInterval> | null = null
 let tray: TrayHandle | null = null        // module-scope so V8 doesn't GC the Tray (architect I4)
+let nativeNotify: NativeNotifyHandle | null = null
 let isQuitting = false
 
 function createWindow(): void {
@@ -57,11 +59,14 @@ app.whenReady().then(async () => {
     getWebContents: () => BrowserWindow.getAllWindows()[0]?.webContents,
     relaunchApp: () => app.relaunch(),
     exitApp: () => app.exit(),
-    // v0.4.0: fan the SAME RunEvent stream the renderer gets out to the tray too (tray isn't
-    // created yet at this point in boot — `tray` is a module-scope `let`, so this closure sees
-    // whatever it's assigned to by the time an event actually fires, same as the tray?.destroy()
-    // pattern already used in the before-quit handler below).
-    onRunEvent: (e: RunEvent) => tray?.applyRunEvent(e)
+    // v0.4.0: fan the SAME RunEvent stream the renderer gets out to the tray + native-failure
+    // notifier too (neither is created yet at this point in boot — both are module-scope `let`s, so
+    // this closure sees whatever they're assigned to by the time an event actually fires, same as
+    // the tray?.destroy() pattern already used in the before-quit handler below).
+    onRunEvent: (e: RunEvent) => {
+      tray?.applyRunEvent(e)
+      nativeNotify?.applyRunEvent(e)
+    }
   }
   let built: BuiltDeps
   try {
@@ -102,6 +107,16 @@ app.whenReady().then(async () => {
     getSummary: built.deps.dashboardSummary,
     onOpenJob: () => showWin()
   })
+  // v0.4.0: macOS native failure notification — reuses the same dashboard-repository query layer
+  // (built.listRunOutcomesSince) and the same notify_settings row (built.deps.notify.getSettings)
+  // the Telegram notifier's Settings panel already writes to; see native-notify.service.ts for the
+  // failure/schedule-only decision this mirrors from schedmgr/notify.go.
+  nativeNotify = createNativeNotifyService({
+    listRunOutcomes: built.listRunOutcomesSince,
+    getNativeEnabled: async () => (await built.deps.notify.getSettings()).nativeEnabled,
+    notifier: createElectronNotifier(),
+    onOpen: showWin
+  })
   stopWatch = watchDbForChanges(built.dbPath, () => built.emit({ kind: 'jobsChanged' }))
   poll = setInterval(() => built.emit({ kind: 'jobsChanged' }), 45_000)
   poll.unref?.()
@@ -112,6 +127,7 @@ app.whenReady().then(async () => {
 
 app.on('before-quit', (e) => {
   tray?.destroy(); tray = null
+  nativeNotify = null // no OS resource to release (unlike tray's icon) — just stop the RunEvent hook
   stopCheckpoint?.()
   stopRetention?.()
   stopWatch?.()

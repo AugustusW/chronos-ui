@@ -66,6 +66,10 @@ export const notifySettings = sqliteTable('notify_settings', {
   // Opt-in (default off): include the failed job's stderr tail in immediate alerts. Off by default
   // because stderr can carry secrets/paths — sending it to Telegram is an explicit user choice.
   includeStderr: integer('includeStderr', { mode: 'boolean' }).notNull().default(false),
+  // v0.4.0: macOS native (Notification Center) alert on a scheduled job's failure — independent of
+  // the Telegram fields above (own toggle, no chatId/token needed). Default ON: unlike Telegram
+  // (opt-in, needs a bot token), a local OS notification has no setup cost, so it starts enabled.
+  nativeEnabled: integer('nativeEnabled', { mode: 'boolean' }).notNull().default(true),
   updatedAt: integer('updatedAt', { mode: 'timestamp_ms' }).notNull().$defaultFn(() => new Date())
 })
 

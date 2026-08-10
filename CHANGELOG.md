@@ -15,6 +15,12 @@ All notable changes to ChronosUI are documented here. The format is based on
   a compact "✓N ✗N" status once there's at least one failure today, and stays quiet the rest of the
   time. Refreshes on every run outcome / schedule change, plus a best-effort refresh right before
   the menu opens.
+- macOS native notification when a scheduled job fails — a Notification Center banner titled with
+  the job name (or "N jobs failed" when several complete around the same time) so you find out
+  without having ChronosUI or Telegram open. Click it to bring the app forward. Independent of the
+  existing Telegram alerts (its own "Native failure notifications" toggle in Settings, on by
+  default); like Telegram, only background/scheduled runs trigger it — a run you started yourself
+  is already visible live in the app.
 
 ## [0.3.0] — 2026-08-01
 

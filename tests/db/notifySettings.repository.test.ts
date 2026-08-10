@@ -18,9 +18,19 @@ describe('notifySettings repo', () => {
   })
   it('save() upserts the singleton and get() reads it back', async () => {
     const r = repo()
-    await r.save({ enabled: true, chatId: '42', windowMin: 5 })
+    await r.save({ enabled: true, chatId: '42', windowMin: 5, includeStderr: false, nativeEnabled: true })
     expect(await r.get()).toMatchObject({ enabled: true, chatId: '42', windowMin: 5 })
-    await r.save({ enabled: false, chatId: null, windowMin: 0 })
+    await r.save({ enabled: false, chatId: null, windowMin: 0, includeStderr: false, nativeEnabled: true })
     expect(await r.get()).toMatchObject({ enabled: false, chatId: null, windowMin: 0 })
+  })
+
+  // v0.4.0: native failure notifications default ON (no setup cost, unlike Telegram) and round-trip.
+  it('nativeEnabled defaults to true (DB column default) even when unset', async () => {
+    expect((await repo().get()).nativeEnabled).toBe(true)
+  })
+  it('nativeEnabled persists an explicit false and reads it back', async () => {
+    const r = repo()
+    await r.save({ enabled: false, chatId: null, windowMin: 0, includeStderr: false, nativeEnabled: false })
+    expect((await r.get()).nativeEnabled).toBe(false)
   })
 })

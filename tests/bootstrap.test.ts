@@ -80,6 +80,13 @@ describe('buildMainDeps', () => {
     expect(send).toHaveBeenCalledWith('run:event', { kind: 'jobsChanged' })
     await built.handle.close()
   })
+  it('v0.4.0: exposes listRunOutcomesSince, wired to the active dialect\'s dashboard repo (native-notify.service.ts\'s poll query)', async () => {
+    const built = await buildMainDeps(fakeApp, { exec, platform: 'darwin', appRoot: APP_ROOT, resourcesPath: '/x', dbPath: ':memory:' })
+    expect(typeof built.listRunOutcomesSince).toBe('function')
+    // No fixtures inserted — just proves the wiring round-trips to a real (empty) result, not a stub.
+    expect(await built.listRunOutcomesSince(new Date(0), 10)).toEqual([])
+    await built.handle.close()
+  })
 })
 
 describe('buildMainDeps schedmgr descriptor (postgres backend config)', () => {

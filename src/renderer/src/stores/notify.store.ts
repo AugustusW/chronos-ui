@@ -7,6 +7,7 @@ export function createNotifyStore() {
     chatId: '' as string,
     windowMin: 0,
     includeStderr: false, // opt-in: include failed-job stderr tail in immediate alerts
+    nativeEnabled: true, // macOS native notification on a scheduled job's failure (default ON)
     tokenSet: false,
     tokenStorage: null as 'keychain' | 'file' | null, // where the saved token lives (file = unencrypted)
     token: '' as string, // write-only; cleared after save
@@ -22,6 +23,7 @@ export function createNotifyStore() {
     state.chatId = s.chatId ?? ''
     state.windowMin = s.windowMin
     state.includeStderr = s.includeStderr
+    state.nativeEnabled = s.nativeEnabled
     state.tokenSet = s.tokenSet
     state.tokenStorage = s.tokenStorage
   }
@@ -35,6 +37,7 @@ export function createNotifyStore() {
         chatId: state.chatId || null,
         windowMin: state.windowMin,
         includeStderr: state.includeStderr,
+        nativeEnabled: state.nativeEnabled,
         token: state.token ? state.token : undefined
       })
       if (!r.ok) {
@@ -69,6 +72,8 @@ export function createNotifyStore() {
     set windowMin(v: number) { state.windowMin = v },
     get includeStderr() { return state.includeStderr },
     set includeStderr(v: boolean) { state.includeStderr = v },
+    get nativeEnabled() { return state.nativeEnabled },
+    set nativeEnabled(v: boolean) { state.nativeEnabled = v },
     get token() { return state.token },
     set token(v: string) { state.token = v },
     get tokenSet() { return state.tokenSet },
