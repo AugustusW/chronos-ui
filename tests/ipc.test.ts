@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest'
 import {
   handleGetVersion, handleJobsCreate, handleJobsUpdate, handleJobsAdopt, handleJobsRunNowStreaming, handleJobsRunBatchCancel, handleRunsRecent, handleNotifySave,
   handlePgTestConnection, handlePgSaveSwitch, handlePgGetStatus, handleDashboardSummary,
+  handleRunsSearch, handleJobsRunDurationTrend, handleJobsExportYaml, handleJobsImportPreview, handleJobsImportApply,
   MAX_BATCH_ADOPT, MAX_RUN_LIST_LIMIT, type IpcDeps
 } from '../src/main/ipc'
 import type { DashboardSummary } from '../src/shared/ipc-contract'
@@ -41,6 +42,13 @@ const deps = (over: Partial<IpcDeps> = {}): IpcDeps => ({
   relaunchApp: () => {},
   exitApp: () => {},
   dashboardSummary: async () => fakeDashboardSummary,
+  searchRuns: async () => [],
+  jobRunDurationTrend: async () => [],
+  jobIo: {
+    exportJobs: async () => ({ status: 'canceled' }),
+    previewImport: async () => ({ status: 'canceled' }),
+    applyImport: async () => ({ ok: true, created: 0, updated: 0, errors: [] })
+  },
   ...over
 })
 
@@ -376,5 +384,100 @@ describe('handleDashboardSummary (Task 5)', () => {
     const d = deps({ dashboardSummary: async () => summary })
     const r = await handleDashboardSummary(d)
     expect(r).toEqual(summary)
+  })
+})
+
+describe('handleRunsSearch (v0.4.0)', () => {
+  it('rejects an invalid payload without calling deps.searchRuns', async () => {
+    const searchRuns = vi.fn(async () => [])
+    await expect(handleRunsSearch(deps({ searchRuns }), { result: 'bogus' })).rejects.toThrow('invalid search filters')
+    expect(searchRuns).not.toHaveBeenCalled()
+  })
+  it('converts since (epoch ms) to a Date and defaults limit to RUN_SEARCH_PAGE_SIZE (50)', async () => {
+    let got: unknown
+    const d = deps({ searchRuns: async (f) => { got = f; return [] } })
+    await handleRunsSearch(d, { jobId: 3, result: 'failure', since: 1000, searchText: 'x' })
+    expect(got).toEqual({ jobId: 3, result: 'failure', since: new Date(1000), searchText: 'x', limit: 50 })
+  })
+  it('caps limit at MAX_RUN_LIST_LIMIT', async () => {
+    let got: { limit?: number } = {}
+    const d = deps({ searchRuns: async (f) => { got = f; return [] } })
+    await handleRunsSearch(d, { limit: MAX_RUN_LIST_LIMIT + 500 })
+    expect(got.limit).toBe(MAX_RUN_LIST_LIMIT)
+  })
+  it('an empty payload (all filters "All") omits jobId/result/since/searchText and uses the default limit', async () => {
+    let got: unknown
+    const d = deps({ searchRuns: async (f) => { got = f; return [] } })
+    await handleRunsSearch(d, {})
+    expect(got).toEqual({ jobId: undefined, result: undefined, since: undefined, searchText: undefined, limit: 50 })
+  })
+})
+
+describe('handleJobsRunDurationTrend (v0.4.0)', () => {
+  it('rejects a missing/invalid jobId', async () => {
+    await expect(handleJobsRunDurationTrend(deps(), {})).rejects.toThrow('invalid jobId')
+  })
+  it('delegates to deps.jobRunDurationTrend with the jobId', async () => {
+    let got = 0
+    const d = deps({ jobRunDurationTrend: async (id) => { got = id; return [] } })
+    await handleJobsRunDurationTrend(d, { jobId: 9 })
+    expect(got).toBe(9)
+  })
+})
+
+describe('handleJobsExportYaml (v0.4.0)', () => {
+  it('rejects a non-array jobIds', async () => {
+    const r = await handleJobsExportYaml(deps(), { jobIds: 'nope' })
+    expect(r).toEqual({ status: 'error', error: 'invalid jobIds' })
+  })
+  it('passes jobIds through when valid, and undefined when omitted', async () => {
+    let got: number[] | undefined = []
+    const d = deps({ jobIo: { exportJobs: async (ids) => { got = ids; return { status: 'canceled' } }, previewImport: async () => ({ status: 'canceled' }), applyImport: async () => ({ ok: true, created: 0, updated: 0, errors: [] }) } })
+    await handleJobsExportYaml(d, { jobIds: [1, 2] })
+    expect(got).toEqual([1, 2])
+    await handleJobsExportYaml(d, {})
+    expect(got).toBeUndefined()
+  })
+})
+
+describe('handleJobsImportPreview (v0.4.0)', () => {
+  it('delegates straight to deps.jobIo.previewImport', async () => {
+    const preview = { status: 'ok' as const, preview: { fileName: 'jobs.yaml', entries: [] } }
+    const d = deps({ jobIo: { exportJobs: async () => ({ status: 'canceled' }), previewImport: async () => preview, applyImport: async () => ({ ok: true, created: 0, updated: 0, errors: [] }) } })
+    expect(await handleJobsImportPreview(d)).toEqual(preview)
+  })
+})
+
+describe('handleJobsImportApply (v0.4.0)', () => {
+  it('rejects a missing/empty entries array without calling applyImport', async () => {
+    const applyImport = vi.fn(async () => ({ ok: true, created: 0, updated: 0, errors: [] }))
+    const d = deps({ jobIo: { exportJobs: async () => ({ status: 'canceled' }), previewImport: async () => ({ status: 'canceled' }), applyImport } })
+    const r1 = await handleJobsImportApply(d, {})
+    const r2 = await handleJobsImportApply(d, { entries: [] })
+    expect(r1.ok).toBe(false)
+    expect(r2.ok).toBe(false)
+    expect(applyImport).not.toHaveBeenCalled()
+  })
+  it('rejects an entry missing required fields (name/scheduleExpr/command)', async () => {
+    const applyImport = vi.fn(async () => ({ ok: true, created: 0, updated: 0, errors: [] }))
+    const d = deps({ jobIo: { exportJobs: async () => ({ status: 'canceled' }), previewImport: async () => ({ status: 'canceled' }), applyImport } })
+    const r = await handleJobsImportApply(d, { entries: [{ name: 'x' }] })
+    expect(r.ok).toBe(false)
+    expect(applyImport).not.toHaveBeenCalled()
+  })
+  it('rejects a scheduleExpr with an embedded newline (same isLine guard as jobs:create)', async () => {
+    const applyImport = vi.fn(async () => ({ ok: true, created: 0, updated: 0, errors: [] }))
+    const d = deps({ jobIo: { exportJobs: async () => ({ status: 'canceled' }), previewImport: async () => ({ status: 'canceled' }), applyImport } })
+    const r = await handleJobsImportApply(d, { entries: [{ name: 'x', scheduleExpr: '* * * * *\nevil', command: '/b.sh' }] })
+    expect(r.ok).toBe(false)
+    expect(applyImport).not.toHaveBeenCalled()
+  })
+  it('forwards a valid entries array to deps.jobIo.applyImport', async () => {
+    let got: unknown
+    const d = deps({ jobIo: { exportJobs: async () => ({ status: 'canceled' }), previewImport: async () => ({ status: 'canceled' }), applyImport: async (e) => { got = e; return { ok: true, created: 1, updated: 0, errors: [] } } } })
+    const entries = [{ name: 'x', scheduleExpr: '0 3 * * *', command: '/b.sh', enabled: false }]
+    const r = await handleJobsImportApply(d, { entries })
+    expect(r).toEqual({ ok: true, created: 1, updated: 0, errors: [] })
+    expect(got).toEqual(entries)
   })
 })

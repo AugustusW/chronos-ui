@@ -58,7 +58,8 @@
     "croner": "^10.0.1",
     "drizzle-orm": "^0.36.4",
     "pg": "^8.22.0",
-    "vue-router": "^4.6.4"
+    "vue-router": "^4.6.4",
+    "yaml": "^2.9.0"
   },
   "build": {
     "appId": "com.augustusw.chronos-ui",

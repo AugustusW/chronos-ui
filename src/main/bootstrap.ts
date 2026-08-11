@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 import { spawn, execFile } from 'node:child_process'
-import { writeFileSync, rmSync, mkdirSync } from 'node:fs'
+import { writeFileSync, readFileSync, rmSync, mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, dirname } from 'node:path'
 import type { DatabaseHandle } from './db/client'
 import { openAndMigrate, drainPgHandle } from './db/lifecycle'
-import { createRepositories, type RunOutcomeRow } from './db/repositories'
+import { createRepositories, type RunOutcomeRow, type RunSearchFilters, type RunLogWithJob } from './db/repositories'
 import { readBackendConfig } from './db/backendConfig'
 import { schedmgrDbDescriptor } from './scheduler/descriptor'
 import { resolveDbPath, resolveMigrationsPaths, type AppPaths } from './db/paths'
@@ -15,6 +15,7 @@ import { makeCrontabExec, makePowerShellExec, type ExecFn } from './scheduler'
 import { createJobsService } from './services/jobs.service'
 import { createDashboardService } from './services/dashboard.service'
 import { createNotifyService } from './services/notify.service'
+import { createJobIoService, type JobIoServiceDeps } from './services/job-io.service'
 import { goSecretDir } from './services/notify-secret'
 import { keychainWriteSupported, type ExecFn as KeychainExecFn } from './services/notify-keychain'
 import { createLaunchdFlush, type FlushScheduler } from './services/notify-flush-launchd'
@@ -25,7 +26,8 @@ import { pgSecretRead } from './services/pg-secret'
 import { redactDsn } from './services/pg-dsn'
 import { testConnection, switchToPostgres, switchToSqlite, type SwitchResult, type TestConnectionResult } from './services/backend-switch'
 import type { IpcDeps } from './ipc'
-import type { RunEvent, PgStatus } from '../shared/ipc-contract'
+import type { RunEvent, PgStatus, RunDurationTrendPoint } from '../shared/ipc-contract'
+import { JOB_TREND_LIMIT } from '../shared/dashboard-limits'
 
 type App = AppPaths & { getName(): string; getVersion(): string; getAppPath(): string }
 
@@ -82,6 +84,16 @@ export interface BuildOpts {
    *  IPC subscription) — this is the main-process side of that same pattern. Optional so every
    *  existing caller (tests, non-Electron callers) is unaffected. */
   onRunEvent?: (e: RunEvent) => void
+  /** v0.4.0: YAML export/import file dialogs (job-io.service.ts) — injected so it runs under vitest
+   *  without a real Electron `dialog`; index.ts wires the real `dialog.showSaveDialog`/
+   *  `showOpenDialog`. Default is "always canceled" — a caller that never supplies these (nearly
+   *  every existing test) simply can't trigger the file-picker path, not a silent no-op success. */
+  showSaveDialog?: JobIoServiceDeps['showSaveDialog']
+  showOpenDialog?: JobIoServiceDeps['showOpenDialog']
+  /** v0.4.0 test seams: default to real node:fs (plain I/O, no Electron dependency — unlike the
+   *  dialogs above there's no reason to stub these out by default). */
+  readFile?: JobIoServiceDeps['readFile']
+  writeFile?: JobIoServiceDeps['writeFile']
 }
 
 export interface BuiltDeps {
@@ -228,6 +240,22 @@ export async function buildMainDeps(app: App, opts: BuildOpts = {}): Promise<Bui
   const adapter = createAdapter(platform, exec, { schedmgrPath, dbPath: schedmgrDescriptor })
   const service = createJobsService({ repos, adapter, platform, schedmgrPath, dbPath: schedmgrDescriptor })
 
+  // v0.4.0: YAML import/export — reuses `service`'s create/update/enable/disable (the SAME path
+  // "New job" / the job editor already go through, native-scheduler-adapter included) rather than
+  // writing DB rows directly. Dialogs default to "always canceled" / fs defaults to real node:fs —
+  // see BuildOpts' doc comments for why each defaults the way it does.
+  const jobIo = createJobIoService({
+    listJobs: () => repos.jobs.list(),
+    createJob: (input) => service.create(input),
+    updateJob: (id, changes) => service.update(id, changes),
+    enableJob: (id) => service.enable(id),
+    disableJob: (id) => service.disable(id),
+    showSaveDialog: opts.showSaveDialog ?? (async () => ({ canceled: true })),
+    showOpenDialog: opts.showOpenDialog ?? (async () => ({ canceled: true, filePaths: [] })),
+    readFile: opts.readFile ?? ((p) => readFileSync(p, 'utf8')),
+    writeFile: opts.writeFile ?? ((p, c) => writeFileSync(p, c, 'utf8'))
+  })
+
   // notify-flush entry: macOS uses a per-user LaunchAgent (avoids the SysAdminFiles "administer this
   // computer" prompt that editing crontab triggers); linux/win delegate to the scheduler adapter.
   const flushScheduler: FlushScheduler =
@@ -337,6 +365,18 @@ export async function buildMainDeps(app: App, opts: BuildOpts = {}): Promise<Bui
   // relaunchApp()/exitApp()), a real drainPgHandle (db/lifecycle.ts) for a postgres handle.
   const drainDb = (): Promise<void> => (handle.dialect === 'postgres' ? drainPgHandle(handle) : Promise.resolve())
 
+  // v0.4.0: Run History search — a thin pass-through to the repo layer, same shape as
+  // recentRuns/listRunsForJob below (the IPC handler does the payload validation + limit capping).
+  const searchRuns = (filters: RunSearchFilters): Promise<RunLogWithJob[]> => repos.runLogs.searchRuns(filters)
+  // v0.4.0: job run-duration trend sparkline — fixed at JOB_TREND_LIMIT (not renderer-controlled,
+  // same "the limit lives server-side" convention as dashboard.service.ts's DASHBOARD_*_LIMIT), and
+  // converts startedAt to epoch ms here (this is where dashboardSummary's own Date→ms conversion
+  // happens too, one layer up from the raw Date-returning repo).
+  const jobRunDurationTrend = async (jobId: number): Promise<RunDurationTrendPoint[]> => {
+    const rows = await repos.runLogs.listRunDurationTrend(jobId, JOB_TREND_LIMIT)
+    return rows.map((r) => ({ durationMs: r.durationMs, result: r.result, startedAt: r.startedAt.getTime() }))
+  }
+
   const deps: IpcDeps = {
     meta: { name: app.getName(), version: app.getVersion() },
     service,
@@ -353,7 +393,10 @@ export async function buildMainDeps(app: App, opts: BuildOpts = {}): Promise<Bui
     drainDb,
     relaunchApp: opts.relaunchApp ?? (() => {}),
     exitApp: opts.exitApp ?? (() => {}),
-    dashboardSummary: () => dashboard.getSummary()
+    dashboardSummary: () => dashboard.getSummary(),
+    searchRuns,
+    jobRunDurationTrend,
+    jobIo
   }
   const pruneRunLogs = (cutoff: Date): Promise<number> => repos.runLogs.pruneOlderThan(cutoff)
   const listRunOutcomesSince = (since: Date, limit: number): Promise<RunOutcomeRow[]> =>

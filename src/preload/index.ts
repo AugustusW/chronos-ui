@@ -3,7 +3,8 @@ import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import { IPC } from '../shared/ipc-contract'
 import type {
   AppVersion, ReconcileResult, CreateJobInput, UpdateJobChanges, AdoptItem, RunNowResult, Job, RunLog, WriteResult, BatchWriteResult, RunEvent,
-  NotifySettingsDTO, NotifySaveInput, SaveResult, PgDsnParts, PgSaveSwitchInput, PgSaveSwitchResult, TestConnectionResult, PgStatus, DashboardSummary
+  NotifySettingsDTO, NotifySaveInput, SaveResult, PgDsnParts, PgSaveSwitchInput, PgSaveSwitchResult, TestConnectionResult, PgStatus, DashboardSummary,
+  RunSearchInput, RunLogWithJob, RunDurationTrendPoint, YamlJobEntry, ExportYamlResult, ImportPreviewResult, ImportApplyResult
 } from '../shared/ipc-contract'
 
 const api = {
@@ -36,7 +37,13 @@ const api = {
   pgTestConnection: (fields: PgDsnParts): Promise<TestConnectionResult> => ipcRenderer.invoke(IPC.pgTestConnection, fields),
   pgSaveSwitch: (input: PgSaveSwitchInput): Promise<PgSaveSwitchResult> => ipcRenderer.invoke(IPC.pgSaveSwitch, input),
   pgGetStatus: (): Promise<PgStatus> => ipcRenderer.invoke(IPC.pgGetStatus),
-  dashboardSummary: (): Promise<DashboardSummary> => ipcRenderer.invoke(IPC.dashboardSummary)
+  dashboardSummary: (): Promise<DashboardSummary> => ipcRenderer.invoke(IPC.dashboardSummary),
+  // v0.4.0
+  searchRuns: (filters: RunSearchInput): Promise<RunLogWithJob[]> => ipcRenderer.invoke(IPC.runsSearch, filters),
+  jobRunDurationTrend: (jobId: number): Promise<RunDurationTrendPoint[]> => ipcRenderer.invoke(IPC.jobsRunDurationTrend, { jobId }),
+  exportJobsYaml: (jobIds?: number[]): Promise<ExportYamlResult> => ipcRenderer.invoke(IPC.jobsExportYaml, { jobIds }),
+  importJobsPreview: (): Promise<ImportPreviewResult> => ipcRenderer.invoke(IPC.jobsImportPreview),
+  importJobsApply: (entries: YamlJobEntry[]): Promise<ImportApplyResult> => ipcRenderer.invoke(IPC.jobsImportApply, { entries })
 }
 
 contextBridge.exposeInMainWorld('chronos', api)

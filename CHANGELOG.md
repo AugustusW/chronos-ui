@@ -21,6 +21,15 @@ All notable changes to ChronosUI are documented here. The format is based on
   existing Telegram alerts (its own "Native failure notifications" toggle in Settings, on by
   default); like Telegram, only background/scheduled runs trigger it — a run you started yourself
   is already visible live in the app.
+- Run History can now be filtered by job, result, and date range (today / 7 days / 30 days / all
+  time), plus a free-text search across job name and captured stdout/stderr. Results show which
+  job each run belongs to; a "Load 50 more" button appears once a page fills up.
+- A run-duration trend sparkline on each job's detail page — the last 20 completed runs at a
+  glance, with failed/timed-out runs marked so a slow patch and a broken patch don't look the same.
+- Import and export job definitions as YAML, from Settings (all jobs) or a job's own detail page
+  (just that one). Importing shows a new/changed/unchanged preview — grouped by what will actually
+  happen — before anything is applied; nothing is ever silently overwritten. See the README for the
+  file format.
 
 ## [0.3.0] — 2026-08-01
 

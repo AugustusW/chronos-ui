@@ -1,9 +1,12 @@
 <!-- SettingsView.vue · SPDX-License-Identifier: Apache-2.0 -->
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { onMounted, ref } from 'vue'
 import ThemeToggle from '../components/ThemeToggle.vue'
+import ImportPreviewDialog from '../components/ImportPreviewDialog.vue'
 import { useNotifyStore } from '../stores/notify.store'
 import { useDbSettingsStore } from '../stores/dbsettings.store'
+import { api } from '../ipc/api'
+import type { ImportPreview } from '../../../shared/ipc-contract'
 const n = useNotifyStore()
 const db = useDbSettingsStore()
 onMounted(() => { n.load(); db.load() })
@@ -13,6 +16,52 @@ const BACKEND_LABEL: Record<'sqlite' | 'postgres', string> = { sqlite: 'SQLite',
 async function confirmSwitch(): Promise<void> {
   if (!window.confirm('Switch the database backend? The app will restart to apply the change.')) return
   await db.saveSwitch()
+}
+
+// v0.4.0: YAML job import/export
+const exportStatus = ref<string | null>(null)
+const importPreview = ref<ImportPreview | null>(null)
+const importOpen = ref(false)
+const importApplying = ref(false)
+const importStatus = ref<string | null>(null)
+
+async function exportAllJobs(): Promise<void> {
+  exportStatus.value = null
+  const r = await api.exportJobsYaml()
+  if (r.status === 'ok') exportStatus.value = `Exported to ${r.path} ✓`
+  else if (r.status === 'error') exportStatus.value = `Export failed: ${r.error}`
+}
+
+async function startImport(): Promise<void> {
+  importStatus.value = null
+  const r = await api.importJobsPreview()
+  if (r.status === 'ok') {
+    importPreview.value = r.preview
+    importOpen.value = true
+  } else if (r.status === 'error') {
+    importStatus.value = `Import failed: ${r.error}`
+  }
+}
+
+async function confirmImport(): Promise<void> {
+  if (!importPreview.value) return
+  importApplying.value = true
+  try {
+    const entries = importPreview.value.entries.map((d) => d.entry)
+    const r = await api.importJobsApply(entries)
+    importStatus.value = r.ok
+      ? `Imported ✓ — ${r.created} created, ${r.updated} updated`
+      : `Imported with errors — ${r.created} created, ${r.updated} updated, ${r.errors.length} failed: ${r.errors.join('; ')}`
+    importOpen.value = false
+    importPreview.value = null
+  } finally {
+    importApplying.value = false
+  }
+}
+
+function cancelImport(): void {
+  importOpen.value = false
+  importPreview.value = null
 }
 </script>
 <template>
@@ -96,6 +145,24 @@ async function confirmSwitch(): Promise<void> {
       <div v-if="n.error" class="row err">{{ n.error }}</div>
       <p class="row muted">Create a bot with @BotFather; get your chat id from @userinfobot.</p>
     </section>
+    <section>
+      <h2>Job Definitions</h2>
+      <div class="row">
+        <button data-test="export-all-jobs" @click="exportAllJobs">Export all jobs to YAML…</button>
+        <button data-test="import-jobs" @click="startImport">Import from YAML…</button>
+      </div>
+      <div class="row muted">
+        Export writes every job's schedule, command and settings to a YAML file — not run history or
+        Telegram/notification settings. Import previews new/changed/unchanged jobs and asks for
+        confirmation before applying anything.
+      </div>
+      <div v-if="exportStatus" class="row muted" data-test="export-status">{{ exportStatus }}</div>
+      <div v-if="importStatus" class="row muted" data-test="import-status">{{ importStatus }}</div>
+    </section>
+    <ImportPreviewDialog
+      :open="importOpen" :preview="importPreview" :applying="importApplying"
+      @confirm="confirmImport" @cancel="cancelImport"
+    />
   </div>
 </template>
 <style scoped>

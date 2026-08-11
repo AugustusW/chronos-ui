@@ -77,3 +77,21 @@ export function deriveJobName(command: string): string {
   const base = first.split('/').at(-1) ?? ''
   return base || 'job'
 }
+
+export type DateRangePreset = 'today' | '7d' | '30d' | 'all'
+
+/** Resolves a Run History date-range PRESET (v0.4.0, RunHistoryView.vue) to a `since` epoch-ms
+ *  lower bound — `undefined` for 'all' (no bound at all, so the search filter is simply omitted).
+ *  'today' = local midnight, same definition as dashboard.service.ts's localMidnight, reimplemented
+ *  here rather than imported: main-process code can't cross into the renderer bundle (same
+ *  project-boundary reasoning as tray-menu.ts's own duplicated `hhmm`). */
+export function resolveDateRangePreset(preset: DateRangePreset, now: number = Date.now()): number | undefined {
+  if (preset === 'all') return undefined
+  if (preset === 'today') {
+    const d = new Date(now)
+    d.setHours(0, 0, 0, 0)
+    return d.getTime()
+  }
+  const days = preset === '7d' ? 7 : 30
+  return now - days * 86_400_000
+}

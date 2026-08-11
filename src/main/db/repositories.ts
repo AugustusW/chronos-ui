@@ -15,6 +15,9 @@ import { createPgNotifySettingsRepo } from './notifySettings.repository.pg'
 // this module.
 import type { FailureRow, RunOutcomeRow } from './dashboard.repository'
 export type { FailureRow, RunOutcomeRow }
+// Same pattern for the v0.4.0 Run History search + trend-sparkline types (runLogs.repository.ts).
+import type { RunDurationPoint, RunLogWithJob, RunSearchFilters } from './runLogs.repository'
+export type { RunDurationPoint, RunLogWithJob, RunSearchFilters }
 
 type RunResult = 'success' | 'failure' | 'timeout'
 type TriggeredBy = 'schedule' | 'manual'
@@ -43,6 +46,10 @@ export interface RunLogsRepo {
   getLatest(jobId: number): Promise<RunLog | undefined>
   /** Delete runs older than `cutoff` (retention sweep); returns rows removed. */
   pruneOlderThan(cutoff: Date): Promise<number>
+  /** v0.4.0: JobDetailView's duration-trend sparkline — last `limit` completed runs for one job. */
+  listRunDurationTrend(jobId: number, limit: number): Promise<RunDurationPoint[]>
+  /** v0.4.0: RunHistoryView's filter/search — see RunSearchFilters' doc comment. */
+  searchRuns(filters: RunSearchFilters): Promise<RunLogWithJob[]>
 }
 
 export interface DashboardRepo {
@@ -83,7 +90,9 @@ function sqliteRepos(db: SqliteDb): Repositories {
       listRecent: async (limit) => sr.listRecentRuns(db, limit),
       listForJob: async (jobId, limit) => sr.listRunsForJob(db, jobId, limit),
       getLatest: async (jobId) => sr.getLatestRun(db, jobId),
-      pruneOlderThan: async (cutoff) => sr.pruneRunsOlderThan(db, cutoff)
+      pruneOlderThan: async (cutoff) => sr.pruneRunsOlderThan(db, cutoff),
+      listRunDurationTrend: async (jobId, limit) => sr.listRunDurationTrend(db, jobId, limit),
+      searchRuns: async (filters) => sr.searchRuns(db, filters)
     },
     notifySettings: createSqliteNotifySettingsRepo(db),
     dashboard: {

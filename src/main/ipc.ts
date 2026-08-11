@@ -2,13 +2,19 @@
 import { ipcMain } from 'electron'
 import { IPC, type AppVersion } from '../shared/ipc-contract'
 import { isNotifyTokenFormat, isChatIdFormat } from '../shared/notify-validation'
-import type { CreateJobInput, UpdateJobChanges, AdoptItem, ReconcileResult, RunNowResult, PgDsnParts, PgSaveSwitchInput, PgSaveSwitchResult, PgStatus, DashboardSummary } from '../shared/ipc-contract'
+import type {
+  CreateJobInput, UpdateJobChanges, AdoptItem, ReconcileResult, RunNowResult, PgDsnParts, PgSaveSwitchInput, PgSaveSwitchResult, PgStatus, DashboardSummary,
+  RunSearchInput, RunLogWithJob, RunDurationTrendPoint, YamlJobEntry, ExportYamlResult, ImportPreviewResult, ImportApplyResult
+} from '../shared/ipc-contract'
 import type { JobsService } from './services/jobs.service'
 import type { NotifyService, NotifySaveInput } from './services/notify.service'
+import type { JobIoService } from './services/job-io.service'
 import type { RunLog } from './db/schema'
+import type { RunSearchFilters } from './db/repositories'
 import type { WriteResult, BatchWriteResult } from './scheduler/types'
 import { buildDsn } from './services/pg-dsn'
 import type { TestConnectionResult, SwitchResult } from './services/backend-switch'
+import { RUN_SEARCH_PAGE_SIZE } from '../shared/dashboard-limits'
 
 export const MAX_BATCH_ADOPT = 100
 
@@ -42,6 +48,10 @@ export interface IpcDeps {
   relaunchApp: () => void
   exitApp: () => void
   dashboardSummary: () => Promise<DashboardSummary>
+  // v0.4.0
+  searchRuns: (filters: RunSearchFilters) => Promise<RunLogWithJob[]>
+  jobRunDurationTrend: (jobId: number) => Promise<RunDurationTrendPoint[]>
+  jobIo: JobIoService
 }
 
 export function handleGetVersion(meta: { name: string; version: string }): AppVersion {
@@ -250,6 +260,76 @@ export function handleDashboardSummary(deps: IpcDeps): Promise<DashboardSummary>
   return deps.dashboardSummary()
 }
 
+// ---------------------------------------------------------------------------------------------
+// v0.4.0 — Run History search, run-duration trend, YAML import/export.
+// ---------------------------------------------------------------------------------------------
+const isResultEnum = (v: unknown): v is 'success' | 'failure' | 'timeout' =>
+  v === 'success' || v === 'failure' || v === 'timeout'
+
+function isRunSearchInput(p: unknown): p is RunSearchInput {
+  if (!p || typeof p !== 'object') return false
+  const o = p as Record<string, unknown>
+  return (
+    (o.jobId === undefined || isPosInt(o.jobId)) &&
+    (o.result === undefined || isResultEnum(o.result)) &&
+    (o.since === undefined || (typeof o.since === 'number' && Number.isFinite(o.since))) &&
+    (o.searchText === undefined || isStr(o.searchText)) &&
+    (o.limit === undefined || isPosInt(o.limit))
+  )
+}
+export async function handleRunsSearch(deps: IpcDeps, payload: unknown): Promise<RunLogWithJob[]> {
+  if (!isRunSearchInput(payload)) throw new Error('invalid search filters')
+  const limit = payload.limit !== undefined ? Math.min(payload.limit, MAX_RUN_LIST_LIMIT) : RUN_SEARCH_PAGE_SIZE
+  return deps.searchRuns({
+    jobId: payload.jobId,
+    result: payload.result,
+    since: payload.since !== undefined ? new Date(payload.since) : undefined,
+    searchText: payload.searchText,
+    limit
+  })
+}
+
+export async function handleJobsRunDurationTrend(deps: IpcDeps, payload: unknown): Promise<RunDurationTrendPoint[]> {
+  const id = (payload as { jobId?: unknown } | undefined)?.jobId
+  if (!isPosInt(id)) throw new Error('invalid jobId')
+  return deps.jobRunDurationTrend(id)
+}
+
+export async function handleJobsExportYaml(deps: IpcDeps, payload: unknown): Promise<ExportYamlResult> {
+  const p = payload as { jobIds?: unknown } | undefined
+  let jobIds: number[] | undefined
+  if (p?.jobIds !== undefined) {
+    if (!Array.isArray(p.jobIds) || !p.jobIds.every(isPosInt)) return { status: 'error', error: 'invalid jobIds' }
+    jobIds = p.jobIds as number[]
+  }
+  return deps.jobIo.exportJobs(jobIds)
+}
+
+export async function handleJobsImportPreview(deps: IpcDeps): Promise<ImportPreviewResult> {
+  return deps.jobIo.previewImport()
+}
+
+// Mirrors isCreateInput's shape check (same required fields, same isLine newline-injection guard on
+// scheduleExpr/command) plus the extra optional `enabled` YamlJobEntry carries.
+function isYamlJobEntry(p: unknown): p is YamlJobEntry {
+  if (!p || typeof p !== 'object') return false
+  const o = p as Record<string, unknown>
+  return (
+    isStr(o.name) && isLine(o.scheduleExpr) && isLine(o.command) && isOptStr(o.workingDir) && isOptStr(o.category) &&
+    (o.env === undefined || (typeof o.env === 'object' && o.env !== null)) &&
+    (o.timeoutSec === undefined || (typeof o.timeoutSec === 'number' && Number.isInteger(o.timeoutSec))) &&
+    (o.notifyOnFailure === undefined || typeof o.notifyOnFailure === 'boolean') &&
+    (o.enabled === undefined || typeof o.enabled === 'boolean')
+  )
+}
+export async function handleJobsImportApply(deps: IpcDeps, payload: unknown): Promise<ImportApplyResult> {
+  const p = payload as { entries?: unknown } | undefined
+  if (!p || !Array.isArray(p.entries) || p.entries.length === 0 || !p.entries.every(isYamlJobEntry)) {
+    return { ok: false, created: 0, updated: 0, errors: ['invalid import payload'] }
+  }
+  return deps.jobIo.applyImport(p.entries)
+}
+
 export function registerIpcHandlers(deps: IpcDeps): void {
   ipcMain.handle(IPC.appGetVersion, () => handleGetVersion(deps.meta))
   ipcMain.handle(IPC.jobsList, () => handleJobsList(deps))
@@ -275,4 +355,9 @@ export function registerIpcHandlers(deps: IpcDeps): void {
   ipcMain.handle(IPC.pgSaveSwitch, (_e, p) => handlePgSaveSwitch(deps, p))
   ipcMain.handle(IPC.pgGetStatus, () => handlePgGetStatus(deps))
   ipcMain.handle(IPC.dashboardSummary, () => handleDashboardSummary(deps))
+  ipcMain.handle(IPC.runsSearch, (_e, p) => handleRunsSearch(deps, p))
+  ipcMain.handle(IPC.jobsRunDurationTrend, (_e, p) => handleJobsRunDurationTrend(deps, p))
+  ipcMain.handle(IPC.jobsExportYaml, (_e, p) => handleJobsExportYaml(deps, p))
+  ipcMain.handle(IPC.jobsImportPreview, () => handleJobsImportPreview(deps))
+  ipcMain.handle(IPC.jobsImportApply, (_e, p) => handleJobsImportApply(deps, p))
 }

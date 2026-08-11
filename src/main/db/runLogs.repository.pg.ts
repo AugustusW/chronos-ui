@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-import { desc, eq, lt } from 'drizzle-orm'
+import { and, desc, eq, gte, isNotNull, lt, sql } from 'drizzle-orm'
 import type { PgDb } from './client'
-import { runLogs } from './schema.pg'
+import { jobs, runLogs } from './schema.pg'
 import type { RunLog } from './schema'
 import { keepLastBytes } from './output'
+import { escapeLikeTerm, type RunDurationPoint, type RunLogWithJob, type RunSearchFilters } from './runLogs.repository'
 
 /** Postgres implementation of the run-logs repository (mirror of sqlite runLogs.repository.ts). */
 export function createPgRunLogsRepo(db: PgDb) {
@@ -82,6 +83,41 @@ export function createPgRunLogsRepo(db: PgDb) {
     async pruneOlderThan(cutoff: Date): Promise<number> {
       const res = await db.delete(runLogs).where(lt(runLogs.startedAt, cutoff))
       return res.rowCount ?? 0
+    },
+    /** Mirrors sqlite's listRunDurationTrend. */
+    async listRunDurationTrend(jobId: number, limit: number): Promise<RunDurationPoint[]> {
+      return (await db
+        .select({ durationMs: runLogs.durationMs, result: runLogs.result, startedAt: runLogs.startedAt })
+        .from(runLogs)
+        .where(and(eq(runLogs.jobId, jobId), isNotNull(runLogs.result)))
+        .orderBy(desc(runLogs.startedAt), desc(runLogs.id))
+        .limit(limit)) as RunDurationPoint[]
+    },
+    /** Mirrors sqlite's searchRuns — ILIKE (not LIKE) for case-insensitive matching, since unlike
+     *  sqlite's LIKE, Postgres's plain LIKE is case-sensitive. */
+    async searchRuns(filters: RunSearchFilters): Promise<RunLogWithJob[]> {
+      const conditions = []
+      if (filters.jobId !== undefined) conditions.push(eq(runLogs.jobId, filters.jobId))
+      if (filters.result !== undefined) conditions.push(eq(runLogs.result, filters.result))
+      if (filters.since !== undefined) conditions.push(gte(runLogs.startedAt, filters.since))
+      if (filters.searchText) {
+        const pattern = `%${escapeLikeTerm(filters.searchText)}%`
+        conditions.push(
+          sql`(${jobs.name} ILIKE ${pattern} ESCAPE '\\' OR ${runLogs.stdout} ILIKE ${pattern} ESCAPE '\\' OR ${runLogs.stderr} ILIKE ${pattern} ESCAPE '\\')`
+        )
+      }
+      return (await db
+        .select({
+          id: runLogs.id, jobId: runLogs.jobId, triggeredBy: runLogs.triggeredBy, result: runLogs.result,
+          startedAt: runLogs.startedAt, endedAt: runLogs.endedAt, durationMs: runLogs.durationMs,
+          exitCode: runLogs.exitCode, stdout: runLogs.stdout, stderr: runLogs.stderr, createdAt: runLogs.createdAt,
+          jobName: jobs.name
+        })
+        .from(runLogs)
+        .innerJoin(jobs, eq(jobs.id, runLogs.jobId))
+        .where(conditions.length ? and(...conditions) : undefined)
+        .orderBy(desc(runLogs.startedAt), desc(runLogs.id))
+        .limit(filters.limit)) as RunLogWithJob[]
     }
   }
 }

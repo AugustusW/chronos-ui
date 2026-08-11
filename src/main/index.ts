@@ -12,6 +12,7 @@ import { createTray, type TrayHandle } from './tray'
 import { createNativeNotifyService, createElectronNotifier, type NativeNotifyHandle } from './services/native-notify.service'
 import { installNavigationHardening } from './window-security'
 import type { RunEvent } from '../shared/ipc-contract'
+import type { SaveDialogOptions, OpenDialogOptions } from 'electron'
 
 // Install crash guards as early as possible: a stray uncaught error in main must surface a visible,
 // debuggable dialog (ChronosUI is a developer tool) rather than silently quitting the app.
@@ -66,6 +67,18 @@ app.whenReady().then(async () => {
     onRunEvent: (e: RunEvent) => {
       tray?.applyRunEvent(e)
       nativeNotify?.applyRunEvent(e)
+    },
+    // v0.4.0: YAML export/import file dialogs — real electron.dialog, parented to the main window
+    // when one exists (BuildOpts defaults to "always canceled" for callers, like most tests, that
+    // never supply these).
+    showSaveDialog: (opts: SaveDialogOptions) => {
+      const w = BrowserWindow.getAllWindows()[0]
+      return w ? dialog.showSaveDialog(w, opts) : dialog.showSaveDialog(opts)
+    },
+    showOpenDialog: (opts: OpenDialogOptions) => {
+      const w = BrowserWindow.getAllWindows()[0]
+      const full: OpenDialogOptions = { ...opts, properties: ['openFile'] }
+      return w ? dialog.showOpenDialog(w, full) : dialog.showOpenDialog(full)
     }
   }
   let built: BuiltDeps
