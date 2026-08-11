@@ -9,7 +9,8 @@ import {
   countsSince,
   listFailuresSince,
   countFailuresSince,
-  countActiveJobs
+  countActiveJobs,
+  listRunOutcomesSince
 } from '../../src/main/db/dashboard.repository'
 
 const SINCE = new Date('2026-08-01T00:00:00')
@@ -114,5 +115,28 @@ describe('dashboard.repository (sqlite)', () => {
   it('countActiveJobs 只算 enabled AND adopted', () => {
     // jobA/jobB enabled+adopted=2；jobC disabled 不計
     expect(countActiveJobs(h.db)).toBe(2)
+  })
+
+  // v0.4.0 (native-notify.service.ts's poll query): ANY result (not just failures), ASC order,
+  // strictly-greater-than `since` (the exclusive-boundary semantics the watermark relies on),
+  // NULL-result (in-progress) rows excluded, jobName joined + triggeredBy passed through.
+  it('listRunOutcomesSince: 任何 result 都回、ASC 排序、SINCE 前與 NULL result 排除', () => {
+    const rows = listRunOutcomesSince(h.db, SINCE, 10)
+    expect(rows).toHaveLength(4) // jobB 的 -10min(SINCE 前) 與 10:10(NULL result) 都不計
+    expect(rows.map((r) => `${r.jobId}:${r.result}`)).toEqual([
+      `${jobCId}:failure`, `${jobAId}:success`, `${jobAId}:failure`, `${jobAId}:timeout`
+    ])
+    expect(rows[0]).toMatchObject({ jobId: jobCId, jobName: 'jobC', triggeredBy: 'schedule', result: 'failure', exitCode: 1 })
+    expect(rows[3].startedAt.getTime()).toBe(timeoutAt.getTime())
+  })
+
+  it('listRunOutcomesSince: since 邊界是 exclusive（gt，非 gte）— 剛好等於某筆 startedAt 的那筆不會被重覆回傳', () => {
+    expect(listRunOutcomesSince(h.db, timeoutAt, 10)).toHaveLength(0)
+  })
+
+  it('listRunOutcomesSince: limit 生效', () => {
+    const limited = listRunOutcomesSince(h.db, SINCE, 2)
+    expect(limited).toHaveLength(2)
+    expect(limited.map((r) => r.jobId)).toEqual([jobCId, jobAId])
   })
 })

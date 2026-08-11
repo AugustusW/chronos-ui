@@ -9,7 +9,10 @@ import { startCheckpointTimer, startRetentionSweep, pgQuitDrain } from './db/lif
 import { watchDbForChanges } from './db/watch'
 import type { DatabaseHandle } from './db/client'
 import { createTray, type TrayHandle } from './tray'
+import { createNativeNotifyService, createElectronNotifier, type NativeNotifyHandle } from './services/native-notify.service'
 import { installNavigationHardening } from './window-security'
+import type { RunEvent } from '../shared/ipc-contract'
+import type { SaveDialogOptions, OpenDialogOptions } from 'electron'
 
 // Install crash guards as early as possible: a stray uncaught error in main must surface a visible,
 // debuggable dialog (ChronosUI is a developer tool) rather than silently quitting the app.
@@ -21,6 +24,7 @@ let stopRetention: (() => void) | null = null
 let stopWatch: (() => void) | null = null
 let poll: ReturnType<typeof setInterval> | null = null
 let tray: TrayHandle | null = null        // module-scope so V8 doesn't GC the Tray (architect I4)
+let nativeNotify: NativeNotifyHandle | null = null
 let isQuitting = false
 
 function createWindow(): void {
@@ -55,7 +59,27 @@ app.whenReady().then(async () => {
   const bootOpts = {
     getWebContents: () => BrowserWindow.getAllWindows()[0]?.webContents,
     relaunchApp: () => app.relaunch(),
-    exitApp: () => app.exit()
+    exitApp: () => app.exit(),
+    // v0.4.0: fan the SAME RunEvent stream the renderer gets out to the tray + native-failure
+    // notifier too (neither is created yet at this point in boot — both are module-scope `let`s, so
+    // this closure sees whatever they're assigned to by the time an event actually fires, same as
+    // the tray?.destroy() pattern already used in the before-quit handler below).
+    onRunEvent: (e: RunEvent) => {
+      tray?.applyRunEvent(e)
+      nativeNotify?.applyRunEvent(e)
+    },
+    // v0.4.0: YAML export/import file dialogs — real electron.dialog, parented to the main window
+    // when one exists (BuildOpts defaults to "always canceled" for callers, like most tests, that
+    // never supply these).
+    showSaveDialog: (opts: SaveDialogOptions) => {
+      const w = BrowserWindow.getAllWindows()[0]
+      return w ? dialog.showSaveDialog(w, opts) : dialog.showSaveDialog(opts)
+    },
+    showOpenDialog: (opts: OpenDialogOptions) => {
+      const w = BrowserWindow.getAllWindows()[0]
+      const full: OpenDialogOptions = { ...opts, properties: ['openFile'] }
+      return w ? dialog.showOpenDialog(w, full) : dialog.showOpenDialog(full)
+    }
   }
   let built: BuiltDeps
   try {
@@ -89,7 +113,22 @@ app.whenReady().then(async () => {
     onQuit: () => { isQuitting = true; app.quit() },
     // Monochrome menu-bar template (#5): the "…Template" filename makes Electron auto-render it for
     // light/dark menu bars. NOT the full color app icon (which renders oversized + wrong in the tray).
-    iconPath: app.isPackaged ? join(process.resourcesPath, 'trayTemplate.png') : join(__dirname, '../../build/trayTemplate.png')
+    iconPath: app.isPackaged ? join(process.resourcesPath, 'trayTemplate.png') : join(__dirname, '../../build/trayTemplate.png'),
+    // v0.4.0: reuses dashboard.service.ts's query functions via the SAME bootstrap.ts-assembled
+    // deps the IPC handler calls — no separate SQL/logic. Deep-nav into run history isn't wired
+    // (see tray-menu.ts's onOpenJob doc); opening the window onto the Dashboard is enough.
+    getSummary: built.deps.dashboardSummary,
+    onOpenJob: () => showWin()
+  })
+  // v0.4.0: macOS native failure notification — reuses the same dashboard-repository query layer
+  // (built.listRunOutcomesSince) and the same notify_settings row (built.deps.notify.getSettings)
+  // the Telegram notifier's Settings panel already writes to; see native-notify.service.ts for the
+  // failure/schedule-only decision this mirrors from schedmgr/notify.go.
+  nativeNotify = createNativeNotifyService({
+    listRunOutcomes: built.listRunOutcomesSince,
+    getNativeEnabled: async () => (await built.deps.notify.getSettings()).nativeEnabled,
+    notifier: createElectronNotifier(),
+    onOpen: showWin
   })
   stopWatch = watchDbForChanges(built.dbPath, () => built.emit({ kind: 'jobsChanged' }))
   poll = setInterval(() => built.emit({ kind: 'jobsChanged' }), 45_000)
@@ -101,6 +140,7 @@ app.whenReady().then(async () => {
 
 app.on('before-quit', (e) => {
   tray?.destroy(); tray = null
+  nativeNotify = null // no OS resource to release (unlike tray's icon) — just stop the RunEvent hook
   stopCheckpoint?.()
   stopRetention?.()
   stopWatch?.()

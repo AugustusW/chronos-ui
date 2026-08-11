@@ -57,7 +57,13 @@ vim, repeat                       read the run history
 - ✓ Discover the cron / Task Scheduler jobs you already have
 - ✓ Adopt them without migration (no new daemon, fully reversible)
 - ✓ Run any job on demand
-- ✓ Run history with captured stdout/stderr and durations
+- ✓ Run history with captured stdout/stderr and durations — filterable by job, result, and date
+  range, with free-text search across job name and output
+- ✓ A per-job run-duration trend at a glance on the job's detail page
+- ✓ Import/export job definitions as YAML — review a new-vs-changed-vs-unchanged preview before
+  anything is applied
+- ✓ macOS native notification (independent of Telegram) when a scheduled job fails, plus a live
+  Dashboard summary right in the menu bar
 - ✓ Telegram notifications when a scheduled job fails or times out (immediate, or batched into a digest)
 - ✓ SQLite by default, PostgreSQL optional — switch anytime from Settings, with existing data migrated for you
 - ✓ Cross-platform (macOS, Windows; Linux via cron)
@@ -91,6 +97,38 @@ your user account, and never appears in cron lines or config files. Ticking
 "Copy existing SQLite data" migrates your jobs, run history and notification settings
 in one transaction; the original `chronos.db` is left untouched as a backup, and you
 can switch back from the same panel at any time.
+
+### Importing and exporting jobs as YAML
+
+Settings → Job Definitions can export every job to a single YAML file, or (from a job's own
+detail page) just that one job. Each entry is:
+
+```yaml
+- name: Nightly backup           # required
+  scheduleExpr: "0 3 * * *"      # required — the raw cron expression / Task Scheduler trigger
+  command: /usr/local/bin/backup.sh  # required
+  workingDir: /var/backups       # optional
+  env:                           # optional
+    AWS_PROFILE: prod
+  timeoutSec: 1800                # optional
+  category: infra                # optional
+  notifyOnFailure: true           # optional, default false — per-job Telegram opt-in
+  enabled: false                  # optional, default true — omit unless the job is paused
+```
+
+Optional fields are simply omitted when at their default, so a plain job's export is just the
+first three lines. Two things are **deliberately not included**: run history (stdout/stderr/past
+results — this is a definition format, not a backup) and the global Telegram/native-notification
+settings (those live in `notify_settings`, a single app-wide row, not per job — including them here
+would mean either duplicating a bot token into every export or silently ignoring it).
+
+Importing opens a file picker, then shows a preview — every job in the file classified as **new**
+(no existing job with that name), **changed** (name matches an existing job, but ≥1 field differs —
+the preview lists which), or **unchanged** — before anything touches your database. Jobs are
+matched by `name`; nothing is ever silently overwritten, and unchanged jobs are left alone.
+Imported jobs are always created fresh (non-adopted) through the same path "New job" uses, so the
+native cron line / Task Scheduler entry is created for you — importing never re-adopts an existing
+external line.
 
 ## macOS permissions
 

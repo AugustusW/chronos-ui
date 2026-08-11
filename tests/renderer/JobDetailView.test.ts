@@ -11,12 +11,22 @@ vi.mock('vue-router', () => ({
 }))
 
 const listRuns = vi.fn()
+const jobRunDurationTrend = vi.fn()
+const exportJobsYaml = vi.fn()
 
 beforeEach(() => {
   listRuns.mockReset()
   listRuns.mockResolvedValue([])
+  jobRunDurationTrend.mockReset()
+  jobRunDurationTrend.mockResolvedValue([])
+  exportJobsYaml.mockReset()
+  // Augment (not replace) jsdom's real window — the export-button tests below trigger a real DOM
+  // click, which needs window.Event/MouseEvent to still exist (replacing the whole object, as this
+  // file used to, destroys them; see notify-settings.test.ts's same pattern for the same reason).
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  ;(globalThis as any).window = { chronos: { listRuns } }
+  const g = globalThis as any
+  g.window ??= {}
+  g.window.chronos = { listRuns, jobRunDurationTrend, exportJobsYaml }
 })
 
 import JobDetailView from '../../src/renderer/src/views/JobDetailView.vue'
@@ -132,5 +142,45 @@ describe('JobDetailView', () => {
     expect(w.findComponent(SkeletonRows).exists()).toBe(false)
     // Empty-state message confirms the loaded branch rendered
     expect(w.text()).toContain('No runs for this job')
+  })
+
+  // v0.4.0
+  it('fetches and renders the duration trend sparkline for this job', async () => {
+    jobRunDurationTrend.mockResolvedValue([
+      { durationMs: 1000, result: 'success', startedAt: Date.now() },
+      { durationMs: 500, result: 'failure', startedAt: Date.now() - 1000 }
+    ])
+    const w = mount(JobDetailView, { props: { id: '7' } })
+    await flushPromises()
+    expect(jobRunDurationTrend).toHaveBeenCalledWith(7)
+    expect(w.find('[data-test="trend-sparkline"]').exists()).toBe(true)
+  })
+
+  it('a trend fetch failure is swallowed — the rest of the view still renders', async () => {
+    jobRunDurationTrend.mockRejectedValue(new Error('IPC failure'))
+    listRuns.mockResolvedValue([])
+    const w = mount(JobDetailView, { props: { id: '7' } })
+    await flushPromises()
+    expect(w.find('[data-test="trend-empty"]').exists()).toBe(true)
+    expect(w.text()).toContain('No runs for this job')
+  })
+
+  it('"Export to YAML…" calls exportJobsYaml with just this job\'s id and reports the result', async () => {
+    exportJobsYaml.mockResolvedValue({ status: 'ok', path: '/tmp/job7.yaml' })
+    const w = mount(JobDetailView, { props: { id: '7' } })
+    await flushPromises()
+    await w.find('[data-test="export-job"]').trigger('click')
+    await flushPromises()
+    expect(exportJobsYaml).toHaveBeenCalledWith([7])
+    expect(w.find('[data-test="export-status"]').text()).toContain('/tmp/job7.yaml')
+  })
+
+  it('a canceled per-job export shows no status message', async () => {
+    exportJobsYaml.mockResolvedValue({ status: 'canceled' })
+    const w = mount(JobDetailView, { props: { id: '7' } })
+    await flushPromises()
+    await w.find('[data-test="export-job"]').trigger('click')
+    await flushPromises()
+    expect(w.find('[data-test="export-status"]').exists()).toBe(false)
   })
 })

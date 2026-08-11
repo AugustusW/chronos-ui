@@ -32,7 +32,13 @@ export const IPC = {
   // dashboard:summary intentionally aggregates the whole page's read model in one invoke (single
   // fetch per view). Do NOT treat this as precedent for stuffing unrelated concerns into one
   // channel; a future trend-chart endpoint gets its own channel (architect LOW-2).
-  dashboardSummary: 'dashboard:summary'
+  dashboardSummary: 'dashboard:summary',
+  // v0.4.0: the trend-chart endpoint LOW-2 above was written for — its own channel, per-job.
+  jobsRunDurationTrend: 'jobs:runDurationTrend',
+  runsSearch: 'runs:search',
+  jobsExportYaml: 'jobs:exportYaml',
+  jobsImportPreview: 'jobs:importPreview',
+  jobsImportApply: 'jobs:importApply'
 } as const
 
 export interface AppVersion {
@@ -117,7 +123,66 @@ export interface PgStatus {
   keychainAvailable: boolean
 }
 
+/** Renderer → main Run History search filters (v0.4.0, RunHistoryView.vue's runs:search channel).
+ *  `since` is epoch ms — the renderer resolves a date-range PRESET ('today'/'7d'/'30d'/'all') down
+ *  to this single bound (or omits it for 'all') before it ever crosses IPC; the main process only
+ *  ever sees a plain timestamp, never preset semantics. */
+export interface RunSearchInput {
+  jobId?: number
+  result?: 'success' | 'failure' | 'timeout'
+  since?: number
+  searchText?: string
+  limit?: number
+}
+
+/** One point of a job's run-duration trend (v0.4.0 JobDetailView sparkline, jobs:runDurationTrend). */
+export interface RunDurationTrendPoint {
+  durationMs: number | null
+  result: 'success' | 'failure' | 'timeout'
+  startedAt: number
+}
+
+/** YAML import/export job schema (v0.4.0) — deliberately the SAME shape as CreateJobInput plus
+ *  `enabled` (a real config toggle worth round-tripping, unlike `adopted`/DB id/run history, which
+ *  are excluded — see README.md's "YAML job schema" section for the full rationale). Both export
+ *  and import use this one type so the file format only has to be documented once. */
+export interface YamlJobEntry {
+  name: string
+  scheduleExpr: string
+  command: string
+  workingDir?: string
+  env?: Record<string, string>
+  timeoutSec?: number
+  category?: string
+  notifyOnFailure?: boolean
+  enabled?: boolean
+}
+
+export type JobDiffKind = 'new' | 'changed' | 'unchanged'
+
+/** One row of an import preview — `entry` is what the YAML file says, `existingId`/`changedFields`
+ *  are only present for 'changed' (which existing job it'll update, and which fields differ). */
+export interface JobDiffEntry {
+  kind: JobDiffKind
+  entry: YamlJobEntry
+  existingId?: number
+  changedFields?: string[]
+}
+
+export interface ImportPreview {
+  fileName: string
+  entries: JobDiffEntry[]
+}
+
+/** Every file-dialog-backed IPC result carries a `status` so the renderer can tell "the user
+ *  cancelled the dialog" (not an error — no toast/banner) apart from "something actually failed"
+ *  (show the error) apart from success. */
+export type ExportYamlResult = { status: 'ok'; path: string } | { status: 'canceled' } | { status: 'error'; error: string }
+export type ImportPreviewResult = { status: 'ok'; preview: ImportPreview } | { status: 'canceled' } | { status: 'error'; error: string }
+export type ImportApplyResult = { ok: boolean; created: number; updated: number; errors: string[] }
+
 export type { Job, RunLog, ParsedJob, BatchWriteResult, WriteResult }
 export type { NotifySettingsDTO, NotifySaveInput, SaveResult } from '../main/services/notify.service'
 export type { PgDsnParts, TestConnectionResult }
 export type { DashboardSummary, UpcomingRow } from '../main/services/dashboard.service'
+export type { RunLogWithJob } from '../main/db/repositories'

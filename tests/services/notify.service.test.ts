@@ -8,7 +8,7 @@ import type { NotifySettingsInput } from '../../src/main/db/notifySettings.repos
 import type { FlushScheduler } from '../../src/main/services/notify-flush-launchd'
 
 function fakeRepos() {
-  let saved = { enabled: false, chatId: null as string | null, windowMin: 0, includeStderr: false, updatedAt: null as Date | null }
+  let saved = { enabled: false, chatId: null as string | null, windowMin: 0, includeStderr: false, nativeEnabled: true, updatedAt: null as Date | null }
   return {
     notifySettings: {
       get: async () => saved,
@@ -50,6 +50,25 @@ describe('notify service', () => {
     const svc = createNotifyService(baseDeps())
     await svc.saveSettings({ enabled: true, chatId: '42', windowMin: 0 })
     expect((await svc.getSettings()).includeStderr).toBe(false)
+  })
+
+  // v0.4.0: native failure notifications
+  it('getSettings reports nativeEnabled=true initially (matches the schema column default)', async () => {
+    const svc = createNotifyService(baseDeps())
+    expect((await svc.getSettings()).nativeEnabled).toBe(true)
+  })
+
+  it('defaults nativeEnabled to true when the field is omitted (no setup cost, unlike Telegram)', async () => {
+    const svc = createNotifyService(baseDeps())
+    await svc.saveSettings({ enabled: true, chatId: '42', windowMin: 0 })
+    expect((await svc.getSettings()).nativeEnabled).toBe(true)
+  })
+
+  it('persists an explicit nativeEnabled=false and surfaces it in the DTO', async () => {
+    const svc = createNotifyService(baseDeps())
+    const r = await svc.saveSettings({ enabled: true, chatId: '42', windowMin: 0, nativeEnabled: false })
+    expect(r.settings?.nativeEnabled).toBe(false)
+    expect((await svc.getSettings()).nativeEnabled).toBe(false)
   })
 
   it('saveSettings writes the token file and reports tokenSet=true', async () => {

@@ -57,6 +57,59 @@ describe('buildMainDeps', () => {
     expect(built.dbPath).toBe(':memory:')
     await built.handle.close()
   })
+  it('v0.4.0: built.emit fans every RunEvent out to BOTH the renderer webContents sink and the optional onRunEvent hook (index.ts wires the tray here)', async () => {
+    const send = vi.fn()
+    const onRunEvent = vi.fn()
+    const built = await buildMainDeps(fakeApp, {
+      exec, platform: 'darwin', appRoot: APP_ROOT, resourcesPath: '/x', dbPath: ':memory:',
+      getWebContents: () => ({ isDestroyed: () => false, send }) as never,
+      onRunEvent
+    })
+    built.emit({ kind: 'jobsChanged' })
+    expect(send).toHaveBeenCalledWith('run:event', { kind: 'jobsChanged' })
+    expect(onRunEvent).toHaveBeenCalledWith({ kind: 'jobsChanged' })
+    await built.handle.close()
+  })
+  it('onRunEvent is optional — omitting it leaves the renderer sink working as before', async () => {
+    const send = vi.fn()
+    const built = await buildMainDeps(fakeApp, {
+      exec, platform: 'darwin', appRoot: APP_ROOT, resourcesPath: '/x', dbPath: ':memory:',
+      getWebContents: () => ({ isDestroyed: () => false, send }) as never
+    })
+    expect(() => built.emit({ kind: 'jobsChanged' })).not.toThrow()
+    expect(send).toHaveBeenCalledWith('run:event', { kind: 'jobsChanged' })
+    await built.handle.close()
+  })
+  it('v0.4.0: exposes listRunOutcomesSince, wired to the active dialect\'s dashboard repo (native-notify.service.ts\'s poll query)', async () => {
+    const built = await buildMainDeps(fakeApp, { exec, platform: 'darwin', appRoot: APP_ROOT, resourcesPath: '/x', dbPath: ':memory:' })
+    expect(typeof built.listRunOutcomesSince).toBe('function')
+    // No fixtures inserted — just proves the wiring round-trips to a real (empty) result, not a stub.
+    expect(await built.listRunOutcomesSince(new Date(0), 10)).toEqual([])
+    await built.handle.close()
+  })
+  it('v0.4.0: deps.searchRuns / deps.jobRunDurationTrend / deps.jobIo round-trip to the real repo layer (not stubs)', async () => {
+    const built = await buildMainDeps(fakeApp, { exec, platform: 'darwin', appRoot: APP_ROOT, resourcesPath: '/x', dbPath: ':memory:' })
+    expect(await built.deps.searchRuns({ limit: 10 })).toEqual([])
+    expect(await built.deps.jobRunDurationTrend(1)).toEqual([])
+    // jobIo.exportJobs with the default (no dialog injected) stub dialog — proves the "always
+    // canceled" BuildOpts default actually reaches the service, not just that jobIo exists.
+    expect(await built.deps.jobIo.exportJobs()).toEqual({ status: 'error', error: 'No jobs to export' })
+    await built.handle.close()
+  })
+  it('v0.4.0: injected showSaveDialog/showOpenDialog/readFile/writeFile reach job-io.service.ts', async () => {
+    let wrote: { path?: string; content?: string } = {}
+    const built = await buildMainDeps(fakeApp, {
+      exec, platform: 'darwin', appRoot: APP_ROOT, resourcesPath: '/x', dbPath: ':memory:',
+      showSaveDialog: async () => ({ canceled: false, filePath: '/tmp/x.yaml' }),
+      writeFile: (p, c) => { wrote = { path: p, content: c } }
+    })
+    await built.deps.service.create({ name: 'A', scheduleExpr: '* * * * *', command: 'echo hi' })
+    const r = await built.deps.jobIo.exportJobs()
+    expect(r).toEqual({ status: 'ok', path: '/tmp/x.yaml' })
+    expect(wrote.path).toBe('/tmp/x.yaml')
+    expect(wrote.content).toContain('name: A')
+    await built.handle.close()
+  })
 })
 
 describe('buildMainDeps schedmgr descriptor (postgres backend config)', () => {

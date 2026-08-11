@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-import { and, count, desc, eq, gte, inArray, isNotNull, sql } from 'drizzle-orm'
+import { and, count, desc, eq, gt, gte, inArray, isNotNull, sql } from 'drizzle-orm'
 import type { PgDb } from './client'
 import { jobs, runLogs } from './schema.pg'
-import type { FailureRow } from './dashboard.repository'
+import type { FailureRow, RunOutcomeRow } from './dashboard.repository'
 
 const FAILED = ['failure', 'timeout'] as const
 
@@ -45,6 +45,18 @@ export function createPgDashboardRepo(db: PgDb) {
         .from(jobs)
         .where(and(eq(jobs.enabled, true), eq(jobs.adopted, true)))
       return row?.n ?? 0
+    },
+    async listRunOutcomesSince(since: Date, limit: number): Promise<RunOutcomeRow[]> {
+      return (await db
+        .select({
+          jobId: runLogs.jobId, jobName: jobs.name, triggeredBy: runLogs.triggeredBy,
+          result: runLogs.result, exitCode: runLogs.exitCode, startedAt: runLogs.startedAt
+        })
+        .from(runLogs)
+        .innerJoin(jobs, eq(jobs.id, runLogs.jobId))
+        .where(and(gt(runLogs.startedAt, since), isNotNull(runLogs.result)))
+        .orderBy(runLogs.startedAt, runLogs.id)
+        .limit(limit)) as RunOutcomeRow[]
     }
   }
 }

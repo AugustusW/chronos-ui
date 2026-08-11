@@ -8,7 +8,10 @@ import {
   finishRun,
   listRunsForJob,
   listRecentRuns,
-  getLatestRun
+  getLatestRun,
+  listRunDurationTrend,
+  searchRuns,
+  escapeLikeTerm
 } from '../../src/main/db/runLogs.repository'
 import { keepLastBytes } from '../../src/main/db/output'
 
@@ -113,5 +116,124 @@ describe('listRecentRuns', () => {
 
   it('returns empty array when no runs exist', () => {
     expect(listRecentRuns(h.db)).toEqual([])
+  })
+})
+
+// v0.4.0 — JobDetailView's duration-trend sparkline
+describe('listRunDurationTrend', () => {
+  it('returns only COMPLETED runs for the job, most-recent-first, capped at limit', () => {
+    const r1 = startRun(h.db, { jobId, triggeredBy: 'schedule', startedAt: new Date(1000) })
+    finishRun(h.db, r1.id, { result: 'success', endedAt: new Date(1500) })
+    const r2 = startRun(h.db, { jobId, triggeredBy: 'schedule', startedAt: new Date(2000) })
+    finishRun(h.db, r2.id, { result: 'failure', endedAt: new Date(2300), exitCode: 1 })
+    startRun(h.db, { jobId, triggeredBy: 'schedule', startedAt: new Date(3000) }) // still in-progress — excluded
+
+    const trend = listRunDurationTrend(h.db, jobId, 10)
+    expect(trend).toHaveLength(2)
+    expect(trend.map((t) => t.result)).toEqual(['failure', 'success']) // most-recent-first
+    expect(trend[1]).toMatchObject({ durationMs: 500, result: 'success' })
+
+    expect(listRunDurationTrend(h.db, jobId, 1)).toHaveLength(1)
+  })
+
+  it("excludes another job's runs", () => {
+    const jobId2 = createJob(h.db, { name: 'other', source: 'native_cron', platform: 'darwin', scheduleExpr: '* * * * *', command: 'x' }).id
+    const r = startRun(h.db, { jobId: jobId2, triggeredBy: 'schedule' })
+    finishRun(h.db, r.id, { result: 'success' })
+    expect(listRunDurationTrend(h.db, jobId, 10)).toEqual([])
+  })
+})
+
+// v0.4.0 — Run History search
+describe('escapeLikeTerm', () => {
+  it('escapes %, _ and the escape char itself', () => {
+    expect(escapeLikeTerm('50%')).toBe('50\\%')
+    expect(escapeLikeTerm('a_b')).toBe('a\\_b')
+    expect(escapeLikeTerm('back\\slash')).toBe('back\\\\slash')
+  })
+  it('leaves an ordinary term untouched', () => {
+    expect(escapeLikeTerm('backup failed')).toBe('backup failed')
+  })
+})
+
+describe('searchRuns', () => {
+  let jobId2: number
+  beforeEach(() => {
+    jobId2 = createJob(h.db, { name: 'Nightly Backup', source: 'native_cron', platform: 'darwin', scheduleExpr: '0 3 * * *', command: 'x' }).id
+  })
+
+  it('with no filters, returns everything newest-first, joined with jobName', () => {
+    const r1 = startRun(h.db, { jobId, triggeredBy: 'schedule', startedAt: new Date(1000) })
+    finishRun(h.db, r1.id, { result: 'success' })
+    const r2 = startRun(h.db, { jobId: jobId2, triggeredBy: 'schedule', startedAt: new Date(2000) })
+    finishRun(h.db, r2.id, { result: 'failure', exitCode: 1 })
+
+    const rows = searchRuns(h.db, { limit: 10 })
+    expect(rows.map((r) => r.jobName)).toEqual(['Nightly Backup', 'job'])
+  })
+
+  it('filters by jobId', () => {
+    const r1 = startRun(h.db, { jobId, triggeredBy: 'schedule' })
+    finishRun(h.db, r1.id, { result: 'success' })
+    const r2 = startRun(h.db, { jobId: jobId2, triggeredBy: 'schedule' })
+    finishRun(h.db, r2.id, { result: 'success' })
+    expect(searchRuns(h.db, { jobId, limit: 10 }).map((r) => r.id)).toEqual([r1.id])
+  })
+
+  it('filters by result', () => {
+    const r1 = startRun(h.db, { jobId, triggeredBy: 'schedule' })
+    finishRun(h.db, r1.id, { result: 'success' })
+    const r2 = startRun(h.db, { jobId, triggeredBy: 'schedule' })
+    finishRun(h.db, r2.id, { result: 'timeout' })
+    expect(searchRuns(h.db, { result: 'timeout', limit: 10 }).map((r) => r.id)).toEqual([r2.id])
+  })
+
+  it('filters by since (inclusive)', () => {
+    const r1 = startRun(h.db, { jobId, triggeredBy: 'schedule', startedAt: new Date(1000) })
+    finishRun(h.db, r1.id, { result: 'success' })
+    const r2 = startRun(h.db, { jobId, triggeredBy: 'schedule', startedAt: new Date(2000) })
+    finishRun(h.db, r2.id, { result: 'success' })
+    expect(searchRuns(h.db, { since: new Date(2000), limit: 10 }).map((r) => r.id)).toEqual([r2.id])
+  })
+
+  it('searchText matches job name, case-insensitively', () => {
+    const r1 = startRun(h.db, { jobId, triggeredBy: 'schedule' })
+    finishRun(h.db, r1.id, { result: 'success' })
+    const r2 = startRun(h.db, { jobId: jobId2, triggeredBy: 'schedule' })
+    finishRun(h.db, r2.id, { result: 'success' })
+    expect(searchRuns(h.db, { searchText: 'nightly', limit: 10 }).map((r) => r.id)).toEqual([r2.id])
+  })
+
+  it('searchText matches stdout/stderr content', () => {
+    const r1 = startRun(h.db, { jobId, triggeredBy: 'schedule' })
+    finishRun(h.db, r1.id, { result: 'failure', stderr: 'connection refused on port 5432' })
+    const r2 = startRun(h.db, { jobId, triggeredBy: 'schedule' })
+    finishRun(h.db, r2.id, { result: 'success', stdout: 'all good' })
+    expect(searchRuns(h.db, { searchText: 'refused', limit: 10 }).map((r) => r.id)).toEqual([r1.id])
+  })
+
+  it('a literal "%" in the search term matches literally, not as a wildcard (escapeLikeTerm)', () => {
+    const r1 = startRun(h.db, { jobId, triggeredBy: 'schedule' })
+    finishRun(h.db, r1.id, { result: 'failure', stderr: 'disk 100% full' })
+    const r2 = startRun(h.db, { jobId, triggeredBy: 'schedule' })
+    finishRun(h.db, r2.id, { result: 'failure', stderr: 'disk XYZ full' }) // would ALSO match if % were a real wildcard
+    expect(searchRuns(h.db, { searchText: '100%', limit: 10 }).map((r) => r.id)).toEqual([r1.id])
+  })
+
+  it('combines filters with AND', () => {
+    const r1 = startRun(h.db, { jobId, triggeredBy: 'schedule' })
+    finishRun(h.db, r1.id, { result: 'failure' })
+    const r2 = startRun(h.db, { jobId: jobId2, triggeredBy: 'schedule' })
+    finishRun(h.db, r2.id, { result: 'failure' })
+    expect(searchRuns(h.db, { jobId, result: 'failure', limit: 10 }).map((r) => r.id)).toEqual([r1.id])
+    expect(searchRuns(h.db, { jobId: jobId2, result: 'success', limit: 10 })).toEqual([])
+  })
+
+  it('respects limit', () => {
+    for (let i = 0; i < 5; i++) {
+      const r = startRun(h.db, { jobId, triggeredBy: 'schedule', startedAt: new Date(1000 + i) })
+      finishRun(h.db, r.id, { result: 'success' })
+    }
+    expect(searchRuns(h.db, { limit: 2 })).toHaveLength(2)
   })
 })

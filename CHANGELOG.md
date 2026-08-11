@@ -6,6 +6,31 @@ All notable changes to ChronosUI are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-08-11
+
+### Added
+- Tray menu now shows a live Dashboard summary: today's succeeded/failed counts, up to 5 recent
+  failed jobs (click one to open the app), and the next upcoming run — no more digging through the
+  window just to check whether anything broke overnight. The menu bar icon itself (macOS) picks up
+  a compact "✓N ✗N" status once there's at least one failure today, and stays quiet the rest of the
+  time. Refreshes on every run outcome / schedule change, plus a best-effort refresh right before
+  the menu opens.
+- macOS native notification when a scheduled job fails — a Notification Center banner titled with
+  the job name (or "N jobs failed" when several complete around the same time) so you find out
+  without having ChronosUI or Telegram open. Click it to bring the app forward. Independent of the
+  existing Telegram alerts (its own "Native failure notifications" toggle in Settings, on by
+  default); like Telegram, only background/scheduled runs trigger it — a run you started yourself
+  is already visible live in the app.
+- Run History can now be filtered by job, result, and date range (today / 7 days / 30 days / all
+  time), plus a free-text search across job name and captured stdout/stderr. Results show which
+  job each run belongs to; a "Load 50 more" button appears once a page fills up.
+- A run-duration trend sparkline on each job's detail page — the last 20 completed runs at a
+  glance, with failed/timed-out runs marked so a slow patch and a broken patch don't look the same.
+- Import and export job definitions as YAML, from Settings (all jobs) or a job's own detail page
+  (just that one). Importing shows a new/changed/unchanged preview — grouped by what will actually
+  happen — before anything is applied; nothing is ever silently overwritten. See the README for the
+  file format.
+
 ## [0.3.0] — 2026-08-01
 
 ### Added

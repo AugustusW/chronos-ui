@@ -15,4 +15,17 @@ describe('notify IPC handlers', () => {
     expect(r.ok).toBe(true)
     expect(save).toHaveBeenCalledWith({ enabled: true, chatId: '1', windowMin: 5, token: '123:ABC' })
   })
+
+  // v0.4.0: nativeEnabled — optional at the boundary (like includeStderr), but must be a boolean when present
+  it('accepts a valid payload with nativeEnabled and forwards it as-is', async () => {
+    const save = vi.fn(async () => ({ ok: true }))
+    const r = await handleNotifySave(depsWith({ saveSettings: save }), { enabled: true, chatId: '1', windowMin: 5, nativeEnabled: false })
+    expect(r.ok).toBe(true)
+    expect(save).toHaveBeenCalledWith({ enabled: true, chatId: '1', windowMin: 5, nativeEnabled: false })
+  })
+
+  it('rejects a non-boolean nativeEnabled', async () => {
+    const r = await handleNotifySave(depsWith({}), { enabled: true, chatId: '1', windowMin: 5, nativeEnabled: 'yes' })
+    expect(r.ok).toBe(false)
+  })
 })

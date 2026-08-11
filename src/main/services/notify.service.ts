@@ -11,8 +11,8 @@ import { NOTIFY_TOKEN_SERVICE, keychainWriteSupported, keychainStore, keychainRe
  *  Linux); 'file' = a 0600 plaintext file (Windows, or a keychain-write failure) — surfaced so the UI
  *  can warn the user it is unencrypted. */
 export type TokenStorage = 'keychain' | 'file'
-export type NotifySettingsDTO = { enabled: boolean; chatId: string | null; windowMin: number; includeStderr: boolean; tokenSet: boolean; tokenStorage: TokenStorage | null }
-export type NotifySaveInput = { enabled: boolean; chatId: string | null; windowMin: number; includeStderr?: boolean; token?: string }
+export type NotifySettingsDTO = { enabled: boolean; chatId: string | null; windowMin: number; includeStderr: boolean; nativeEnabled: boolean; tokenSet: boolean; tokenStorage: TokenStorage | null }
+export type NotifySaveInput = { enabled: boolean; chatId: string | null; windowMin: number; includeStderr?: boolean; nativeEnabled?: boolean; token?: string }
 export type SaveResult = { ok: boolean; settings?: NotifySettingsDTO; flushWarning?: string }
 
 const KEYCHAIN_ACCOUNT = 'chronos-ui'
@@ -84,9 +84,9 @@ export function createNotifyService(deps: NotifyServiceDeps): NotifyService {
     }
     return existsSync(tokenPath) ? 'file' : null
   }
-  const toDTO = async (s: { enabled: boolean; chatId: string | null; windowMin: number; includeStderr: boolean }): Promise<NotifySettingsDTO> => {
+  const toDTO = async (s: { enabled: boolean; chatId: string | null; windowMin: number; includeStderr: boolean; nativeEnabled: boolean }): Promise<NotifySettingsDTO> => {
     const storage = await tokenStorage()
-    return { enabled: s.enabled, chatId: s.chatId, windowMin: s.windowMin, includeStderr: s.includeStderr, tokenSet: storage !== null, tokenStorage: storage }
+    return { enabled: s.enabled, chatId: s.chatId, windowMin: s.windowMin, includeStderr: s.includeStderr, nativeEnabled: s.nativeEnabled, tokenSet: storage !== null, tokenStorage: storage }
   }
 
   return {
@@ -117,9 +117,17 @@ export function createNotifyService(deps: NotifyServiceDeps): NotifyService {
       }
 
       if (input.token !== undefined && input.token !== '') await storeToken(input.token)
-      // includeStderr is optional at the IPC/service boundary (an omitting caller); the repo layer
-      // requires an explicit bool, so ground a missing value to false (the secure default) here.
-      const saved = await deps.repos.notifySettings.save({ enabled: input.enabled, chatId: input.chatId, windowMin: input.windowMin, includeStderr: input.includeStderr ?? false })
+      // includeStderr / nativeEnabled are optional at the IPC/service boundary (an omitting caller);
+      // the repo layer requires an explicit bool, so ground a missing value to its secure/default
+      // here: includeStderr → false (opt-in, can carry secrets), nativeEnabled → true (no setup cost,
+      // matches the schema column default for a caller that predates this field).
+      const saved = await deps.repos.notifySettings.save({
+        enabled: input.enabled,
+        chatId: input.chatId,
+        windowMin: input.windowMin,
+        includeStderr: input.includeStderr ?? false,
+        nativeEnabled: input.nativeEnabled ?? true
+      })
 
       const wantFlush = input.enabled && input.windowMin >= 1
       try {

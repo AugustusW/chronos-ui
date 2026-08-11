@@ -60,6 +60,8 @@ export const notifySettings = pgTable('notify_settings', {
   // Opt-in (default off): include the failed job's stderr tail in immediate alerts (stderr can carry
   // secrets, so sending it to Telegram is an explicit user choice). Mirrors schema.ts.
   includeStderr: boolean('includeStderr').notNull().default(false),
+  // v0.4.0: macOS native (Notification Center) alert on a scheduled job's failure. Mirrors schema.ts.
+  nativeEnabled: boolean('nativeEnabled').notNull().default(true),
   updatedAt: ts('updatedAt').notNull().$defaultFn(() => new Date())
 })
 

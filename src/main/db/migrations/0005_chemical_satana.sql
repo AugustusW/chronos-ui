@@ -1,0 +1,1 @@
+ALTER TABLE `notify_settings` ADD `nativeEnabled` integer DEFAULT true NOT NULL;

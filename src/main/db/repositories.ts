@@ -10,10 +10,14 @@ import { createPgDashboardRepo } from './dashboard.repository.pg'
 import { createSqliteNotifySettingsRepo, type NotifySettingsRepo } from './notifySettings.repository'
 import { createPgNotifySettingsRepo } from './notifySettings.repository.pg'
 
-// FailureRow is defined in dashboard.repository.ts (not here) to avoid a repositories.ts ↔
-// dashboard.repository.ts circular import; re-exported so consumers only need this module.
-import type { FailureRow } from './dashboard.repository'
-export type { FailureRow }
+// FailureRow / RunOutcomeRow are defined in dashboard.repository.ts (not here) to avoid a
+// repositories.ts ↔ dashboard.repository.ts circular import; re-exported so consumers only need
+// this module.
+import type { FailureRow, RunOutcomeRow } from './dashboard.repository'
+export type { FailureRow, RunOutcomeRow }
+// Same pattern for the v0.4.0 Run History search + trend-sparkline types (runLogs.repository.ts).
+import type { RunDurationPoint, RunLogWithJob, RunSearchFilters } from './runLogs.repository'
+export type { RunDurationPoint, RunLogWithJob, RunSearchFilters }
 
 type RunResult = 'success' | 'failure' | 'timeout'
 type TriggeredBy = 'schedule' | 'manual'
@@ -42,6 +46,10 @@ export interface RunLogsRepo {
   getLatest(jobId: number): Promise<RunLog | undefined>
   /** Delete runs older than `cutoff` (retention sweep); returns rows removed. */
   pruneOlderThan(cutoff: Date): Promise<number>
+  /** v0.4.0: JobDetailView's duration-trend sparkline — last `limit` completed runs for one job. */
+  listRunDurationTrend(jobId: number, limit: number): Promise<RunDurationPoint[]>
+  /** v0.4.0: RunHistoryView's filter/search — see RunSearchFilters' doc comment. */
+  searchRuns(filters: RunSearchFilters): Promise<RunLogWithJob[]>
 }
 
 export interface DashboardRepo {
@@ -49,6 +57,9 @@ export interface DashboardRepo {
   listFailuresSince(since: Date, limit: number): Promise<FailureRow[]>
   countFailuresSince(since: Date): Promise<number>
   countActiveJobs(): Promise<number> // enabled AND adopted
+  /** v0.4.0: native-notify.service.ts's poll query — completed runs (any result) since the last
+   *  watermark; see RunOutcomeRow's doc comment for why this isn't pre-filtered to failures. */
+  listRunOutcomesSince(since: Date, limit: number): Promise<RunOutcomeRow[]>
 }
 
 export interface Repositories {
@@ -79,14 +90,17 @@ function sqliteRepos(db: SqliteDb): Repositories {
       listRecent: async (limit) => sr.listRecentRuns(db, limit),
       listForJob: async (jobId, limit) => sr.listRunsForJob(db, jobId, limit),
       getLatest: async (jobId) => sr.getLatestRun(db, jobId),
-      pruneOlderThan: async (cutoff) => sr.pruneRunsOlderThan(db, cutoff)
+      pruneOlderThan: async (cutoff) => sr.pruneRunsOlderThan(db, cutoff),
+      listRunDurationTrend: async (jobId, limit) => sr.listRunDurationTrend(db, jobId, limit),
+      searchRuns: async (filters) => sr.searchRuns(db, filters)
     },
     notifySettings: createSqliteNotifySettingsRepo(db),
     dashboard: {
       countsSince: async (since) => sd.countsSince(db, since),
       listFailuresSince: async (since, limit) => sd.listFailuresSince(db, since, limit),
       countFailuresSince: async (since) => sd.countFailuresSince(db, since),
-      countActiveJobs: async () => sd.countActiveJobs(db)
+      countActiveJobs: async () => sd.countActiveJobs(db),
+      listRunOutcomesSince: async (since, limit) => sd.listRunOutcomesSince(db, since, limit)
     }
   }
 }

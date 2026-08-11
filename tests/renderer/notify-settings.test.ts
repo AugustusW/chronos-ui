@@ -16,8 +16,8 @@ beforeEach(() => {
   g.window ??= {} as Record<string, unknown>
   g.window.chronos = {
     platform: 'darwin',
-    getNotifySettings: vi.fn(async () => ({ enabled: false, chatId: null, windowMin: 0, tokenSet: false })),
-    saveNotifySettings: vi.fn(async () => ({ ok: true, settings: { enabled: true, chatId: '42', windowMin: 0, tokenSet: true } })),
+    getNotifySettings: vi.fn(async () => ({ enabled: false, chatId: null, windowMin: 0, nativeEnabled: true, tokenSet: false })),
+    saveNotifySettings: vi.fn(async () => ({ ok: true, settings: { enabled: true, chatId: '42', windowMin: 0, nativeEnabled: true, tokenSet: true } })),
     testNotify: vi.fn(async () => ({ ok: true })),
     // SettingsView also mounts the Database section (Bolt 4, T16), which calls pgGetStatus on load —
     // stubbed here so mounting doesn't throw; these tests don't assert on Database section behavior
@@ -72,5 +72,21 @@ describe('SettingsView notifications', () => {
     await w.find('[data-test="notify-save"]').trigger('click')
     await flushPromises()
     expect(window.chronos.saveNotifySettings).toHaveBeenCalledWith(expect.objectContaining({ includeStderr: true }))
+  })
+
+  // v0.4.0: native failure notifications
+  it('loads nativeEnabled from the bridge and reflects it in the checkbox', async () => {
+    window.chronos.getNotifySettings = vi.fn(async () => ({ enabled: false, chatId: null, windowMin: 0, nativeEnabled: false, tokenSet: false }))
+    const w = mount(SettingsView)
+    await flushPromises()
+    expect((w.find('[data-test="notify-native-enable"]').element as HTMLInputElement).checked).toBe(false)
+  })
+  it('saving forwards nativeEnabled to the bridge', async () => {
+    const w = mount(SettingsView)
+    await flushPromises()
+    await w.find('[data-test="notify-native-enable"]').setValue(false)
+    await w.find('[data-test="notify-save"]').trigger('click')
+    await flushPromises()
+    expect(window.chronos.saveNotifySettings).toHaveBeenCalledWith(expect.objectContaining({ nativeEnabled: false }))
   })
 })
