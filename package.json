@@ -25,6 +25,7 @@
     "stage:schedmgr": "node scripts/build-schedmgr.mjs",
     "dist:mac": "npm run stage:schedmgr && npm run build && npm run rebuild:native && electron-builder --mac --arm64",
     "dist:win": "npm run stage:schedmgr && npm run build && npm run rebuild:native && electron-builder --win --x64",
+    "release:mac": "bash scripts/release-mac.sh",
     "rebuild:native": "node scripts/rebuild-native.mjs"
   },
   "devDependencies": {
