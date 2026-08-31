@@ -1,0 +1,54 @@
+name: Verify release assets
+
+# Why this exists: the macOS .dmg is the one artifact CI cannot produce. The Developer ID key is
+# Cloud-managed and cannot be exported to a .p12, so the signed + notarized installer is built and
+# uploaded by hand (see RELEASING.md). Nothing failed when that step was skipped for v0.4.0, so the
+# release sat for 20 days with a Windows installer only while the README pointed macOS users at it.
+#
+# CI being green was the problem: every automated part succeeded, and success was read as "fine".
+# This job exists to turn a forgotten manual step into a failing build.
+#
+# Note: GitHub disables scheduled workflows on a repository with no activity for 60 days. If this
+# stops running, push anything or re-enable it from the Actions tab.
+
+on:
+  release:
+    types: [published, edited]
+  schedule:
+    - cron: '17 9 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Latest release must carry both installers
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          tag=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq '.tag_name')
+          assets=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq '.assets[].name')
+
+          echo "Latest release: $tag"
+          echo "Assets:"
+          echo "$assets" | sed 's/^/  /'
+
+          missing=""
+          grep -q '\.dmg$'  <<<"$assets" || missing="$missing macOS(.dmg)"
+          grep -q '\.exe$'  <<<"$assets" || missing="$missing Windows(.exe)"
+
+          if [ -n "$missing" ]; then
+            echo
+            echo "::error::Release $tag is missing installers for:$missing"
+            echo "The macOS .dmg is built locally, not by CI. See RELEASING.md, or run:"
+            echo "  source ~/.config/chronos-ui/notarize.env && npm run release:mac"
+            exit 1
+          fi
+
+          echo
+          echo "Both installers present."
