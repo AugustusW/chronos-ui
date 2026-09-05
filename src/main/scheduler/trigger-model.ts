@@ -1,94 +1,26 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// ChronosUI's normalized Windows trigger descriptor (spec §7: scheduleExpr may be
-// a "normalized Task Scheduler trigger" — Windows does NOT use cron). A compact,
-// parseable mini-format mapping 1:1 onto the trigger types New-ScheduledTaskTrigger
-// builds natively. Supported v1 kinds:
-//   daily HH:MM | weekly MON,WED,FRI HH:MM | minutes N | hourly N |
-//   onlogon | onstart | once YYYY-MM-DDTHH:MM
-// (monthly is a documented v1 gap — New-ScheduledTaskTrigger has no -Monthly; it
-// needs a raw CIM trigger and is deferred.)
+// PowerShell-specific half of the Windows trigger model. The descriptor grammar itself
+// (parse / validate / describe) lives in src/shared/trigger-validation.ts because the job editor
+// must reject a bad schedule before submitting it, and a second copy of the rules in the renderer
+// is precisely how the "editor asks for cron, adapter accepts descriptors" defect arose.
+//
+// Re-exported here so main-process callers (next-run.ts, task-scheduler.adapter.ts, scheduler/index.ts)
+// keep importing from one place.
 
-export type WeekDay = 'MON' | 'TUE' | 'WED' | 'THU' | 'FRI' | 'SAT' | 'SUN'
+import { WEEKDAY_FULL, type TriggerSpec, type WeekDay } from '../../shared/trigger-validation'
 
-export type TriggerSpec =
-  | { kind: 'daily'; at: string }
-  | { kind: 'weekly'; days: WeekDay[]; at: string }
-  | { kind: 'minutes'; every: number }
-  | { kind: 'hourly'; every: number }
-  | { kind: 'onlogon' }
-  | { kind: 'onstart' }
-  | { kind: 'once'; at: string }
+export {
+  WEEKDAYS,
+  WEEKDAY_FULL,
+  TRIGGER_DESCRIPTOR_EXAMPLE,
+  parseTriggerDescriptor,
+  triggerSpecToDescriptor,
+  validateTriggerDescriptor,
+  describeTriggerDescriptor
+} from '../../shared/trigger-validation'
+export type { TriggerSpec, WeekDay } from '../../shared/trigger-validation'
 
-const WEEKDAYS: WeekDay[] = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN']
-const WEEKDAY_FULL: Record<WeekDay, string> = {
-  MON: 'Monday', TUE: 'Tuesday', WED: 'Wednesday', THU: 'Thursday', FRI: 'Friday', SAT: 'Saturday', SUN: 'Sunday'
-}
-
-const HHMM_RE = /^([01]\d|2[0-3]):([0-5]\d)$/
-const ONCE_RE = /^\d{4}-\d{2}-\d{2}T([01]\d|2[0-3]):([0-5]\d)$/
-
-function assertTime(at: string): void {
-  if (!HHMM_RE.test(at)) throw new Error(`trigger: bad time ${at} (want HH:MM)`)
-}
-
-export function parseTriggerDescriptor(s: string): TriggerSpec {
-  const [head, ...rest] = s.trim().split(/\s+/)
-  switch (head) {
-    case 'daily': {
-      if (rest.length !== 1) throw new Error(`trigger: 'daily' wants HH:MM`)
-      assertTime(rest[0])
-      return { kind: 'daily', at: rest[0] }
-    }
-    case 'weekly': {
-      if (rest.length !== 2) throw new Error(`trigger: 'weekly' wants DAYS HH:MM`)
-      const days = rest[0].split(',').map((d) => d.toUpperCase())
-      for (const d of days) if (!WEEKDAYS.includes(d as WeekDay)) throw new Error(`trigger: bad day ${d}`)
-      assertTime(rest[1])
-      // keep canonical MON..SUN order
-      const ordered = WEEKDAYS.filter((w) => days.includes(w))
-      return { kind: 'weekly', days: ordered, at: rest[1] }
-    }
-    case 'minutes': {
-      const n = Number(rest[0])
-      if (rest.length !== 1 || !Number.isInteger(n) || n < 1) throw new Error(`trigger: 'minutes' wants a positive integer`)
-      return { kind: 'minutes', every: n }
-    }
-    case 'hourly': {
-      const n = Number(rest[0])
-      if (rest.length !== 1 || !Number.isInteger(n) || n < 1) throw new Error(`trigger: 'hourly' wants a positive integer`)
-      return { kind: 'hourly', every: n }
-    }
-    case 'onlogon':
-      if (rest.length !== 0) throw new Error(`trigger: 'onlogon' takes no args`)
-      return { kind: 'onlogon' }
-    case 'onstart':
-      if (rest.length !== 0) throw new Error(`trigger: 'onstart' takes no args`)
-      return { kind: 'onstart' }
-    case 'once': {
-      if (rest.length !== 1 || !ONCE_RE.test(rest[0])) throw new Error(`trigger: 'once' wants YYYY-MM-DDTHH:MM`)
-      return { kind: 'once', at: rest[0] }
-    }
-    default:
-      throw new Error(`trigger: unknown kind ${head}`)
-  }
-}
-
-export function triggerSpecToDescriptor(spec: TriggerSpec): string {
-  switch (spec.kind) {
-    case 'daily': return `daily ${spec.at}`
-    case 'weekly': return `weekly ${spec.days.join(',')} ${spec.at}`
-    case 'minutes': return `minutes ${spec.every}`
-    case 'hourly': return `hourly ${spec.every}`
-    case 'onlogon': return 'onlogon'
-    case 'onstart': return 'onstart'
-    case 'once': return `once ${spec.at}`
-  }
-}
-
-// Render a PowerShell New-ScheduledTaskTrigger expression. minutes/hourly anchor a
-// -Once trigger at (Get-Date) with an indefinite RepetitionInterval (PowerShell
-// evaluates Get-Date at run time).
 export function triggerSpecToPwsh(spec: TriggerSpec): string {
   switch (spec.kind) {
     case 'daily':

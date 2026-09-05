@@ -5,6 +5,8 @@ import ThemeToggle from '../components/ThemeToggle.vue'
 import ImportPreviewDialog from '../components/ImportPreviewDialog.vue'
 import TeardownDialog from '../components/TeardownDialog.vue'
 import { useScheduleStore } from '../stores/schedule.store'
+import { hostPlatform, schedulerLabel } from '../lib/scheduler-label'
+const nativeScheduler = computed(() => schedulerLabel(hostPlatform()))
 import { useNotifyStore } from '../stores/notify.store'
 import { useDbSettingsStore } from '../stores/dbsettings.store'
 import { api } from '../ipc/api'
@@ -165,18 +167,18 @@ async function confirmTeardown(deleteData: boolean): Promise<void> {
           {{ db.testResult.ok ? `Connection OK — ${db.testResult.version} (${db.testResult.ms} ms)` : `Connection failed — ${db.testResult.error}` }}
         </div>
         <div v-if="db.status.keychainAvailable" class="row muted" data-test="db-keychain-note">
-          Credentials are stored in the OS keychain and shared with the schedule runner. They never appear in cron lines or config files.
+          Credentials are stored in the OS keychain and shared with the schedule runner. They never appear in {{ nativeScheduler }} entries or config files.
         </div>
         <div v-else class="row warn" data-test="db-keychain-warn">
           No OS keychain is available on this platform. The connection string will be stored in a file readable only by this user account (0600).
         </div>
         <label class="row"><input v-model="db.copyData" data-test="db-copydata" type="checkbox" /> Copy existing SQLite data to PostgreSQL</label>
         <div class="row muted">Jobs, run history and notification settings are copied on switch. The current chronos.db file is kept untouched as a backup. Unchecked = start empty.</div>
-        <div class="row muted" data-test="db-switch-note">Switching re-writes the managed cron lines so scheduled runs record to PostgreSQL. This is reversible from the same panel.</div>
+        <div class="row muted" data-test="db-switch-note">Switching re-writes the managed {{ nativeScheduler }} entries so scheduled runs record to PostgreSQL. This is reversible from the same panel.</div>
       </template>
 
       <template v-else>
-        <div class="row muted" data-test="db-switch-note">Switching re-writes the managed cron lines so scheduled runs record to PostgreSQL. This is reversible from the same panel.</div>
+        <div class="row muted" data-test="db-switch-note">Switching re-writes the managed {{ nativeScheduler }} entries so scheduled runs record to PostgreSQL. This is reversible from the same panel.</div>
         <div class="row"><button data-test="db-save-switch" :disabled="db.switching" @click="confirmSwitch()">Save &amp; switch</button></div>
       </template>
 
