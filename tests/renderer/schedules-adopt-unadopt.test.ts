@@ -297,3 +297,52 @@ describe('SchedulesView — AdoptDialog + Un-adopt + feedback', () => {
     })
   })
 })
+
+describe('a failed write must be readable where the user is looking', () => {
+  // Windows verification 2026-09-05: "Adopt 按下去沒有任何結果,也沒有任何回饋 — 對話框不會關閉,
+  // 沒有錯誤訊息,也沒有成功訊息". The handler does set a message. Both dialogs are
+  // `position: fixed; inset: 0` overlays, and the message renders as their sibling in the page
+  // beneath — so on failure the dialog stays open (deliberately) and covers the only report of why.
+  //
+  // Asserting "the page contains the text" would pass against that bug. The assertion has to be
+  // that the text is inside the dialog's own subtree.
+  it('a failed adopt states the reason inside the dialog', async () => {
+    listJobs.mockResolvedValue(MIXED_RESPONSE)
+    adoptJobs.mockResolvedValue({ ok: false, adopted: [], error: 'schedmgr.exe not found' })
+    const w = mount(SchedulesView)
+    await flushPromises()
+
+    w.findAllComponents({ name: 'JobRow' }).find((r) => r.props('item').status === 'unmanaged')!.vm.$emit('adopt')
+    await flushPromises()
+
+    const dialog = w.findComponent({ name: 'AdoptDialog' })
+    dialog.vm.$emit('adopt', { name: 'pg_dump' })
+    await flushPromises()
+
+    // Staying open is right — it keeps the user's input. It is only wrong when it hides the reason.
+    expect(w.findComponent({ name: 'AdoptDialog' }).props('open')).toBe(true)
+    expect(w.findComponent({ name: 'AdoptDialog' }).text()).toContain('schedmgr.exe not found')
+  })
+
+  it('a failed save states the reason inside the job editor', async () => {
+    // Same shape. SchedulesView's own comment says "A rejected write must surface — not silently
+    // close", and the code keeps the editor open for exactly that reason; the message then renders
+    // behind it. The intent was right and the placement defeated it.
+    // Empty list so EmptyState renders: this file replaces globalThis.window with a plain object,
+    // which removes jsdom's Event constructors, so the whole file drives components via $emit
+    // rather than real clicks.
+    listJobs.mockResolvedValue({ items: [], generatedAt: 0 })
+    createJob.mockResolvedValue({ ok: false, error: 'drift: the crontab changed underneath us' })
+    const w = mount(SchedulesView)
+    await flushPromises()
+
+    w.findComponent({ name: 'EmptyState' }).vm.$emit('new')
+    await flushPromises()
+    expect(w.findComponent({ name: 'JobEditor' }).props('open')).toBe(true)
+
+    w.findComponent({ name: 'JobEditor' }).vm.$emit('save', { name: 'x', scheduleExpr: '0 3 * * *', command: '/x.sh' })
+    await flushPromises()
+
+    expect(w.findComponent({ name: 'JobEditor' }).text()).toContain('drift: the crontab changed underneath us')
+  })
+})

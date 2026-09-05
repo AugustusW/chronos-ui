@@ -5,6 +5,8 @@ import { useRouter } from 'vue-router'
 import { useScheduleStore } from '../stores/schedule.store'
 import { api } from '../ipc/api'
 import { deriveJobName } from '../lib/format'
+import { hostPlatform, schedulerLabel } from '../lib/scheduler-label'
+const nativeScheduler = computed(() => schedulerLabel(hostPlatform()))
 import type { CreateJobInput, Job, JobListItem } from '../../../shared/ipc-contract'
 import CategoryFilter from '../components/CategoryFilter.vue'
 import BatchActionBar from '../components/BatchActionBar.vue'
@@ -28,6 +30,9 @@ const adoptOpen = ref(false)
 const adoptTarget = ref<JobListItem | null>(null)
 // Status feedback (success or error)
 const statusMsg = ref<{ kind: 'ok' | 'err'; text: string } | null>(null)
+// Separate from statusMsg: that one also carries un-adopt feedback, which must not appear inside
+// the adopt dialog. A failed adopt keeps the dialog open, so its reason has to live in there.
+const adoptError = ref<string | null>(null)
 // Collapsible group headers
 const collapsed = ref(new Set<string>())
 function toggleGroup(cat: string): void {
@@ -90,7 +95,7 @@ async function batchDisable(): Promise<void> {
 }
 async function batchDelete(): Promise<void> {
   const n = selectedJobIds().length
-  if (!window.confirm(`Delete ${n} job(s)? This permanently removes them and their crontab lines. For jobs you didn't create in ChronosUI, use Un-adopt or Forget to keep the cron line.`)) return
+  if (!window.confirm(`Delete ${n} job(s)? This permanently removes them and their ${nativeScheduler.value} entries. For jobs you didn't create in ChronosUI, use Un-adopt or Forget to keep the entry.`)) return
   for (const id of selectedJobIds()) { try { await api.deleteJob(id) } catch { /* best-effort */ } }
   await store.refresh()
   exitSelect()
@@ -136,12 +141,14 @@ async function onSave(input: CreateJobInput): Promise<void> {
 function onAdopt(it: JobListItem): void {
   if (!it.native) return
   statusMsg.value = null
+  adoptError.value = null
   adoptTarget.value = it
   adoptOpen.value = true
 }
 async function onAdoptConfirm({ name, category }: { name: string; category?: string }): Promise<void> {
   if (!adoptTarget.value?.native) return
   statusMsg.value = null
+  adoptError.value = null
   try {
     const r = await api.adoptJobs([{
       name,
@@ -150,7 +157,7 @@ async function onAdoptConfirm({ name, category }: { name: string; category?: str
       category,
     }])
     if (!r.ok || r.adopted.length === 0) {
-      statusMsg.value = { kind: 'err', text: `Adopt failed: ${r.error ?? r.reason ?? 'unknown error'}` }
+      adoptError.value = `Adopt failed: ${r.error ?? r.reason ?? 'unknown error'}`
       return
     }
     statusMsg.value = { kind: 'ok', text: `Adopted "${name}" ✓` }
@@ -158,7 +165,7 @@ async function onAdoptConfirm({ name, category }: { name: string; category?: str
     await store.refresh()
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
-    statusMsg.value = { kind: 'err', text: `Adopt failed: ${msg}` }
+    adoptError.value = `Adopt failed: ${msg}`
   }
 }
 async function onUnadopt(): Promise<void> {
@@ -210,6 +217,7 @@ async function onScan(): Promise<void> {
       <button class="btn primary" type="button" @click="openNew">＋ New job</button>
     </div>
     <AdoptDialog
+      :error="adoptError"
       :open="adoptOpen"
       :schedule="adoptTarget?.native?.scheduleExpr ?? ''"
       :command="adoptTarget?.native?.command ?? ''"
@@ -218,6 +226,7 @@ async function onScan(): Promise<void> {
       @cancel="adoptOpen = false"
     />
     <JobEditor
+      :error="saveError"
       :open="editorOpen"
       :initial="editorInitial"
       :adopted="editingAdopted"
@@ -226,7 +235,6 @@ async function onScan(): Promise<void> {
       @unadopt="onUnadopt"
       @forget="onForget"
     />
-    <p v-if="saveError" class="save-err">{{ saveError }}</p>
     <p v-if="store.scanError" class="save-err">Scan failed: {{ store.scanError }}</p>
     <p v-if="statusMsg && statusMsg.kind === 'err'" class="save-err">{{ statusMsg.text }}</p>
     <p v-if="statusMsg && statusMsg.kind === 'ok'" class="status-ok">{{ statusMsg.text }}</p>

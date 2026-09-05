@@ -1,19 +1,30 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, it, expect } from 'vitest'
-import { TaskSchedulerAdapter } from '../../src/main/scheduler/task-scheduler.adapter'
+import { TaskSchedulerAdapter, makePowerShellExec, PS_MAX_ENCODED_LEN } from '../../src/main/scheduler/task-scheduler.adapter'
 import type { ExecFn } from '../../src/main/scheduler/types'
 
 const SCHEDMGR = 'C:\\Program Files\\ChronosUI\\schedmgr.exe'
 const DB = 'C:\\Users\\John Doe\\AppData\\ChronosUI\\chronos.db'
 const FOLDER = '\\ChronosUI\\'
 
-// fakePwsh routes by matching key cmdlets in the piped script. It NEVER spawns
-// PowerShell. `respond` lets a test stub the next list/read JSON; `scripts`
-// records every script the adapter ran (so mutations can be asserted).
+// fakePwsh routes by matching key cmdlets in the script. It NEVER spawns PowerShell. `respond`
+// lets a test stub the next list/read JSON; `scripts` records every script the adapter ran (so
+// mutations can be asserted).
+//
+// The script is decoded from the -EncodedCommand argument. It used to be read from the `stdin`
+// parameter, and leaving it that way after the adapter stopped using stdin would have been worse
+// than a broken test: every route would miss, every call would fall through to the catch-all
+// `exitCode: 0`, and the mutation assertions would go on passing while checking an empty string.
+function decodeScript(args: readonly string[]): string {
+  const i = args.indexOf('-EncodedCommand')
+  return i < 0 ? '' : Buffer.from(args[i + 1], 'base64').toString('utf16le')
+}
+
 function makeFakePwsh(opts: { listJson?: string; readJson?: (script: string) => string; xml?: (script: string) => string } = {}) {
   const scripts: string[] = []
-  const exec: ExecFn = async (cmd, _args, stdin) => {
-    const script = stdin ?? ''
+  const exec: ExecFn = async (cmd, args, stdin) => {
+    if (stdin !== undefined) throw new Error('fakePwsh: the adapter must not deliver scripts on stdin')
+    const script = decodeScript(args)
     scripts.push(script)
     if (/Get-ScheduledTask\b/.test(script) && /ConvertTo-Json/.test(script) && /-or \$_\.TaskPath -notlike/.test(script)) {
       return { stdout: opts.listJson ?? '[]', exitCode: 0 } // list()
@@ -130,8 +141,8 @@ describe('TaskSchedulerAdapter drift + enable/disable', () => {
 
   it('normalizeTaskXml ignores volatile <Date> so a Date-only change is NOT drift', async () => {
     let xml = '<Task><Date>2026-01-01</Date><Actions>x</Actions></Task>'
-    const exec: ExecFn = async (_c, _a, stdin) => {
-      const s = stdin ?? ''
+    const exec: ExecFn = async (_c, a) => {
+      const s = decodeScript(a)
       if (/ConvertTo-Json/.test(s) && /-or \$_\.TaskPath -notlike/.test(s)) return { stdout: oneManagedList(xml), exitCode: 0 }
       if (/Export-ScheduledTask/.test(s)) return { stdout: xml, exitCode: 0 }
       return { stdout: '', exitCode: 0 }
@@ -147,8 +158,8 @@ describe('TaskSchedulerAdapter drift + enable/disable', () => {
   it('a mutation refuses with reason=drift if the task XML changed since list()', async () => {
     let xml = '<Task><Actions>orig</Actions></Task>'
     const mutating: string[] = []
-    const exec: ExecFn = async (_c, _a, stdin) => {
-      const s = stdin ?? ''
+    const exec: ExecFn = async (_c, a) => {
+      const s = decodeScript(a)
       if (/ConvertTo-Json/.test(s) && /-or \$_\.TaskPath -notlike/.test(s)) return { stdout: oneManagedList(xml), exitCode: 0 }
       if (/Export-ScheduledTask/.test(s)) return { stdout: xml, exitCode: 0 }
       if (/Disable-ScheduledTask/.test(s)) { mutating.push(s); return { stdout: '', exitCode: 0 } }
@@ -166,8 +177,8 @@ describe('TaskSchedulerAdapter drift + enable/disable', () => {
   it('disableJob runs Disable-ScheduledTask when no drift', async () => {
     const xml = '<Task><Actions>orig</Actions></Task>'
     const mutating: string[] = []
-    const exec: ExecFn = async (_c, _a, stdin) => {
-      const s = stdin ?? ''
+    const exec: ExecFn = async (_c, a) => {
+      const s = decodeScript(a)
       if (/ConvertTo-Json/.test(s) && /-or \$_\.TaskPath -notlike/.test(s)) return { stdout: oneManagedList(xml), exitCode: 0 }
       if (/Export-ScheduledTask/.test(s)) return { stdout: xml, exitCode: 0 }
       if (/Disable-ScheduledTask/.test(s)) { mutating.push(s); return { stdout: '', exitCode: 0 } }
@@ -184,8 +195,8 @@ describe('TaskSchedulerAdapter drift + enable/disable', () => {
   it('enableJob runs Enable-ScheduledTask when no drift', async () => {
     const xml = '<Task><Actions>orig</Actions></Task>'
     const mutating: string[] = []
-    const exec: ExecFn = async (_c, _a, stdin) => {
-      const s = stdin ?? ''
+    const exec: ExecFn = async (_c, a) => {
+      const s = decodeScript(a)
       if (/ConvertTo-Json/.test(s) && /-or \$_\.TaskPath -notlike/.test(s)) return { stdout: oneManagedList(xml), exitCode: 0 }
       if (/Export-ScheduledTask/.test(s)) return { stdout: xml, exitCode: 0 }
       if (/Enable-ScheduledTask/.test(s)) { mutating.push(s); return { stdout: '', exitCode: 0 } }
@@ -210,8 +221,8 @@ describe('TaskSchedulerAdapter adopt/unadopt', () => {
       Description: 'ChronosUI managed job\nchronos:42\nsched:daily 03:00',
       RunLevel: opts.runLevel ?? 'Limited'
     })
-    const exec: ExecFn = async (_c, _a, stdin) => {
-      const s = stdin ?? ''
+    const exec: ExecFn = async (_c, a) => {
+      const s = decodeScript(a)
       if (/Export-ScheduledTask/.test(s)) return { stdout: '<Task><Actions>x</Actions></Task>', exitCode: 0 }
       if (/Get-ScheduledTask\b/.test(s) && /ConvertTo-Json/.test(s) && !/-or \$_\.TaskPath -notlike/.test(s)) {
         return { stdout: readJson, exitCode: 0 } // readOne()
@@ -294,7 +305,7 @@ describe('TaskSchedulerAdapter adopt/unadopt', () => {
 describe('TaskSchedulerAdapter CRUD', () => {
   it('createJob registers a managed (cmd /c, Limited, IgnoreNew) task with a stashed descriptor', async () => {
     const scripts: string[] = []
-    const exec: ExecFn = async (_c, _a, stdin) => { scripts.push(stdin ?? ''); return { stdout: '<Task></Task>', exitCode: 0 } }
+    const exec: ExecFn = async (_c, a) => { scripts.push(decodeScript(a)); return { stdout: '<Task></Task>', exitCode: 0 } }
     const a = adapter(exec)
     const res = await a.createJob({ chronosId: 5, scheduleExpr: 'daily 03:00', command: 'tidy.bat' })
     expect(res.ok).toBe(true)
@@ -327,8 +338,8 @@ describe('TaskSchedulerAdapter CRUD', () => {
   it('updateJob changes the schedule on an unadopted job', async () => {
     // readOne reports an UNadopted job; updateJob(schedule) should run Set-ScheduledTask.
     const setScripts: string[] = []
-    const exec: ExecFn = async (_c, _a, stdin) => {
-      const s = stdin ?? ''
+    const exec: ExecFn = async (_c, a) => {
+      const s = decodeScript(a)
       if (/Export-ScheduledTask/.test(s)) return { stdout: '<Task></Task>', exitCode: 0 }
       if (/Get-ScheduledTask\b/.test(s) && /ConvertTo-Json/.test(s) && !/-or \$_\.TaskPath -notlike/.test(s)) {
         return { stdout: JSON.stringify({ Execute: 'cmd.exe', Arguments: '/c tidy.bat', Description: 'ChronosUI managed job\nchronos:5\nsched:daily 03:00' }), exitCode: 0 }
@@ -344,8 +355,8 @@ describe('TaskSchedulerAdapter CRUD', () => {
   })
 
   it('updateJob refuses to change an adopted job command', async () => {
-    const exec: ExecFn = async (_c, _a, stdin) => {
-      const s = stdin ?? ''
+    const exec: ExecFn = async (_c, a) => {
+      const s = decodeScript(a)
       if (/Export-ScheduledTask/.test(s)) return { stdout: '<Task></Task>', exitCode: 0 }
       if (/Get-ScheduledTask\b/.test(s) && /ConvertTo-Json/.test(s) && !/-or \$_\.TaskPath -notlike/.test(s)) {
         return { stdout: JSON.stringify({ Execute: SCHEDMGR, Arguments: `run 5 --db "${DB}" -- "tidy.bat"`, Description: 'ChronosUI managed job\nchronos:5\nsched:daily 03:00' }), exitCode: 0 }
@@ -361,8 +372,8 @@ describe('TaskSchedulerAdapter CRUD', () => {
   it('updateJob rejects a malformed scheduleExpr (never silently coerces)', async () => {
     // readOne must report an unadopted job so the adopted-command guard is bypassed.
     const setScripts: string[] = []
-    const exec: ExecFn = async (_c, _a, stdin) => {
-      const s = stdin ?? ''
+    const exec: ExecFn = async (_c, a) => {
+      const s = decodeScript(a)
       if (/Export-ScheduledTask/.test(s)) return { stdout: '<Task></Task>', exitCode: 0 }
       if (/Get-ScheduledTask\b/.test(s) && /ConvertTo-Json/.test(s) && !/-or \$_\.TaskPath -notlike/.test(s)) {
         return { stdout: JSON.stringify({ Execute: 'cmd.exe', Arguments: '/c tidy.bat', Description: 'ChronosUI managed job\nchronos:5\nsched:daily 03:00' }), exitCode: 0 }
@@ -389,8 +400,8 @@ describe('TaskSchedulerAdapter CRUD', () => {
       Triggers: [{ CimClass: 'MSFT_TaskDailyTrigger', StartBoundary: '2026-01-01T03:00:00', DaysOfWeek: null, Repetition: null }],
       Xml: x
     }])
-    const exec: ExecFn = async (_c, _a, stdin) => {
-      const s = stdin ?? ''
+    const exec: ExecFn = async (_c, a) => {
+      const s = decodeScript(a)
       if (/ConvertTo-Json/.test(s) && /-or \$_\.TaskPath -notlike/.test(s)) {
         return { stdout: listFor(xml), exitCode: 0 }
       }
@@ -411,8 +422,8 @@ describe('TaskSchedulerAdapter CRUD', () => {
     // A fresh adapter has no list() snapshot — guard() should return null and let the
     // mutation run. This pins the "guard returns null for un-snapshotted ids" contract.
     const unregScripts: string[] = []
-    const exec: ExecFn = async (_c, _a, stdin) => {
-      const s = stdin ?? ''
+    const exec: ExecFn = async (_c, a) => {
+      const s = decodeScript(a)
       if (/Export-ScheduledTask/.test(s)) return { stdout: '<Task></Task>', exitCode: 0 }
       if (/Unregister-ScheduledTask/.test(s)) { unregScripts.push(s); return { stdout: '', exitCode: 0 } }
       return { stdout: '', exitCode: 0 }
@@ -425,7 +436,7 @@ describe('TaskSchedulerAdapter CRUD', () => {
 
   it('deleteJob unregisters the task', async () => {
     const scripts: string[] = []
-    const exec: ExecFn = async (_c, _a, stdin) => { scripts.push(stdin ?? ''); return { stdout: '', exitCode: 0 } }
+    const exec: ExecFn = async (_c, a) => { scripts.push(decodeScript(a)); return { stdout: '', exitCode: 0 } }
     const a = adapter(exec)
     const res = await a.deleteJob(5)
     expect(res.ok).toBe(true)
@@ -437,8 +448,8 @@ describe('TaskSchedulerAdapter releaseAll (teardown)', () => {
   // chronos-42 = adopted (schedmgr action), chronos-7 = created (cmd /c), anything else = not registered.
   function fakeTasks() {
     const setScripts: string[] = []
-    const exec: ExecFn = async (_c, _a, stdin) => {
-      const s = stdin ?? ''
+    const exec: ExecFn = async (_c, a) => {
+      const s = decodeScript(a)
       if (/Set-ScheduledTask/.test(s)) {
         setScripts.push(s)
         return { stdout: '', exitCode: 0 }
@@ -513,5 +524,67 @@ describe('TaskSchedulerAdapter releaseAll (teardown)', () => {
     const r = await a.releaseAll([])
     expect(r.ok).toBe(true)
     expect(setScripts).toHaveLength(0)
+  })
+})
+
+
+describe('PowerShell delivery: -EncodedCommand, not stdin', () => {
+  // Why this changed at all: with `-Command -` the script arrives on stdin, and a multi-line
+  // argument leaves PowerShell in line-continuation. At EOF it discards the buffered script and
+  // exits 0 — Register-ScheduledTask never ran, the adapter saw success, and the database kept a
+  // job the scheduler had never heard of. Measured on Windows 11, 2026-09-04.
+  function capture() {
+    const calls: { cmd: string; args: string[]; stdin?: string }[] = []
+    const exec: ExecFn = async (cmd, args, stdin) => {
+      calls.push({ cmd, args, stdin })
+      return { stdout: '[]', exitCode: 0 }
+    }
+    return { exec, calls }
+  }
+
+  const decode = (args: string[]): string =>
+    Buffer.from(args[args.indexOf('-EncodedCommand') + 1], 'base64').toString('utf16le')
+
+  it('passes the script as a base64 UTF-16LE argument, with nothing on stdin', async () => {
+    const c = capture()
+    await adapter(c.exec).list()
+
+    const { args, stdin } = c.calls[0]
+    expect(stdin).toBeUndefined()
+    expect(args).toContain('-EncodedCommand')
+    expect(args).not.toContain('-Command')
+
+    const script = decode(args)
+    expect(script).toContain("$ErrorActionPreference = 'Stop'")
+    expect(script).toContain('Get-ScheduledTask')
+    // Multi-line is the whole point: this is what the old stdin delivery silently truncated.
+    expect(script.split('\n').length).toBeGreaterThan(3)
+  })
+
+  it('refuses a script too long for the Windows command line instead of letting spawn fail', async () => {
+    // stdin had no length limit; the command line does (~32767 chars on Windows). Moving the
+    // script into argv introduces a failure mode that did not exist before, so it gets an explicit
+    // check with a readable message rather than an opaque spawn error.
+    const c = capture()
+    const a = new TaskSchedulerAdapter({
+      exec: c.exec,
+      schedmgrPath: SCHEDMGR,
+      dbPath: DB,
+      taskFolder: FOLDER
+    })
+    const huge = 'x'.repeat(PS_MAX_ENCODED_LEN)
+    const r = await a.createJob({ chronosId: 1, scheduleExpr: 'daily 03:00', command: huge })
+
+    expect(r.ok).toBe(false)
+    expect('error' in r && r.error).toMatch(/too long/i)
+    expect(c.calls).toHaveLength(0) // never reached PowerShell at all
+  })
+
+  it('makePowerShellExec rejects stdin delivery outright', () => {
+    // The stdin path is dead once the adapter stops using it. Left merely unused it would be an
+    // invitation to reconnect the exact silent failure this change removes, and no test would
+    // notice — the fake exec accepted stdin happily for as long as the bug existed.
+    const exec = makePowerShellExec()
+    expect(() => exec('powershell.exe', ['-NoProfile'], 'Get-Date')).toThrow(/stdin/i)
   })
 })

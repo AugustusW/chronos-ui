@@ -1,10 +1,12 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
+import { hostPlatform, schedulerLabel } from '../lib/scheduler-label'
+const nativeScheduler = computed(() => schedulerLabel(hostPlatform()))
 
 const props = defineProps<{
   open: boolean
-  /** Jobs ChronosUI wrapped — these get their original crontab line back. */
+  /** Jobs ChronosUI wrapped — these get their original scheduler entry back. */
   adoptedCount: number
   /** Jobs created here — their line keeps running, only the marker goes. */
   createdCount: number
@@ -35,8 +37,8 @@ watch(
         <ul v-else class="what">
           <li v-if="adoptedCount" data-teardown-adopted>
             <b>{{ adoptedCount }}</b> adopted
-            {{ adoptedCount === 1 ? 'job returns' : 'jobs return' }} to the original crontab
-            {{ adoptedCount === 1 ? 'line' : 'lines' }}, schedules unchanged.
+            {{ adoptedCount === 1 ? 'job returns' : 'jobs return' }} to the original
+            {{ nativeScheduler }} {{ adoptedCount === 1 ? 'entry' : 'entries' }}, schedules unchanged.
           </li>
           <li v-if="createdCount" data-teardown-created>
             <b>{{ createdCount }}</b>
@@ -44,7 +46,7 @@ watch(
             {{ createdCount === 1 ? 'keeps' : 'keep' }} running. Only the ChronosUI marker is removed.
           </li>
           <li v-if="!adoptedCount && !createdCount" data-teardown-none>
-            No jobs are currently managed, so nothing in the crontab changes.
+            No jobs are currently managed, so nothing in {{ nativeScheduler }} changes.
           </li>
           <li>The notification entry ChronosUI installed is removed.</li>
         </ul>

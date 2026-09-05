@@ -6,6 +6,34 @@ All notable changes to ChronosUI are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.5.1] — 2026-09-05
+
+Windows fixes, plus one that turned out to affect every platform.
+
+### Fixed
+- Creating a job on Windows could report success while Task Scheduler never received it, leaving a
+  job in ChronosUI that the system had never been told about. The scheduler script was delivered on
+  standard input, where a multi-line argument left PowerShell waiting for more and it discarded the
+  script at end of input — exiting successfully. Error detection was affected generally, not only
+  when creating a job: a failing command could come back as a success.
+- The schedule field asked for a cron expression on Windows, which Windows does not use. It now
+  asks for the format the machine actually accepts (`daily 03:00`, `hourly 2`, `weekly MON,FRI
+  07:30`, and so on), previews it in plain language, and explains the difference if a cron
+  expression is entered instead of failing afterwards with `trigger: unknown kind 0`.
+- Failures on Windows reported themselves as a page of XML with the reason at the end and the
+  script — including the job's own command — repeated inside it. The message is now the reason.
+- Text outside the ASCII range came back garbled from Windows: a Chinese, Japanese or accented
+  European path, or any error message in those languages. English-only setups never saw this.
+- **Any platform:** when saving a job or adopting one failed, the reason was written to the page
+  underneath the dialog that caused it — and the dialog stays open on failure so the entry is not
+  lost, so it covered the explanation. The dialogs now show it themselves.
+- Dialogs and prompts no longer refer to crontab on Windows, which has none.
+
+### Known
+- Adopting an existing scheduled task does not work on Windows. It reports `no job N`. This is
+  being worked on separately; jobs created in ChronosUI are unaffected.
+
+
 ## [0.5.0] — 2026-09-05
 
 ### Added

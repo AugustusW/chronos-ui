@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { createHash } from 'node:crypto'
 import { spawn } from 'node:child_process'
+import { readableStderr } from './clixml'
 import { winQuoteArg, winUnquoteArg, psQuote } from './win-quote'
 import { parseTriggerDescriptor, triggerSpecToDescriptor, triggerSpecToPwsh, cimTriggerToDescriptor } from './trigger-model'
 import { buildDescription, parseDescription } from './task-marker'
@@ -11,7 +12,96 @@ import type { AdoptOptions, AdoptionSpec, BatchWriteResult, DriftResult, ExecFn,
 // NOT schtasks.exe — schtasks cannot read/write the Description field we use as the
 // chronos marker, and its CSV/XML surface is brittle to parse (architect D1c).
 
-const PS_ARGS = ['-NoProfile', '-NonInteractive', '-Command', '-']
+/**
+ * Base flags; the script itself rides in `-EncodedCommand <base64 UTF-16LE>`, appended per call.
+ *
+ * NOT `-Command -` (script on stdin), which is what this used to be. A multi-line argument put
+ * PowerShell into line-continuation; at EOF it discarded the buffered script and exited 0. The
+ * cmdlet never ran, the adapter read exit 0 as success, and the database kept a job the scheduler
+ * had never been told about. `$ErrorActionPreference = 'Stop'` did not abort in that mode either,
+ * so error detection was unreliable for every method here, not just the one that was noticed.
+ * Measured on Windows 11, 2026-09-04.
+ */
+const PS_BASE_ARGS = ['-NoProfile', '-NonInteractive', '-EncodedCommand']
+
+/**
+ * Cap on the base64 payload. Windows caps a CreateProcessW command line at ~32767 characters, and
+ * `spawn` without `shell: true` goes straight there. stdin had no such limit, so moving the script
+ * into argv introduces a failure mode that did not exist before — this makes it a legible error
+ * instead of an opaque spawn failure. The remainder of the budget covers the executable path and
+ * the flags above. base64(UTF-16LE(s)) is about 2.67x the length of s, so this still allows a
+ * ~9000-character script against the 1-2 KB the templates actually produce.
+ */
+export const PS_MAX_ENCODED_LEN = 24000
+
+/**
+ * Marks the line the wrapper writes when the body throws. Chosen to be something no cmdlet emits.
+ */
+export const PWSH_ERROR_MARKER = 'chronos-error: '
+
+/**
+ * Wrap a script so it reports its own failure on stdout.
+ *
+ * Windows measured 2026-09-05: with `[Console]::OutputEncoding` set to UTF-8 the raw bytes on
+ * stderr still arrived as cp950. That setting reaches stdout; the error stream is written by the
+ * host and does not follow it. Chasing the encoding of a channel we do not control means guessing
+ * the remote codepage — cp950 on zh-TW, cp936 on zh-CN, cp932 on ja-JP, cp850 across much of
+ * Western Europe — and shipping a decoder for each.
+ *
+ * So the error does not travel on that channel. The body runs inside a catch that writes the
+ * message to stdout, which is measurably UTF-8, and exits non-zero. Three problems leave together:
+ *
+ *   - the encoding, because the message now goes the way that works;
+ *   - the CLIXML envelope, because PowerShell only produces it for the error stream;
+ *   - the echoed script, because we emit the message alone and none of PowerShell's error
+ *     formatting — including the width-truncated `+ …` fragment that survived being matched
+ *     against the full script text.
+ *
+ * `exit` inside the body still exits immediately; `Write-Error` under Stop throws first and lands
+ * in the catch, which is how the existing collision guard keeps working.
+ *
+ * `[Console]::Out.WriteLine` rather than `Write-Output`, for two reasons. It writes straight to the
+ * process's stdout instead of through PowerShell's host, so it is not subject to the console-width
+ * wrapping that split "exists" into "exist" + "s" in the CLIXML records; and it uses the encoding
+ * just assigned on the line above, which is the whole point of the exercise.
+ *
+ * ProgressPreference is silenced because progress records are the other thing PowerShell writes to
+ * stderr — the cp950 bytes measured on Windows were "正在準備模組以便第一次使用", a progress
+ * record. Nothing reads them.
+ */
+export function wrapPwshScript(body: string): string {
+  return [
+    `[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false`,
+    `$ProgressPreference = 'SilentlyContinue'`,
+    `$ErrorActionPreference = 'Stop'`,
+    `try {`,
+    body,
+    `} catch {`,
+    `  [Console]::Out.WriteLine('${PWSH_ERROR_MARKER}' + $_.Exception.Message)`,
+    `  exit 1`,
+    `}`
+  ].join('\n')
+}
+
+/**
+ * The message a failed run should show.
+ *
+ * The marked line first: that is the wrapper's own report, already plain UTF-8 text. Everything
+ * else is a fallback for a failure that never reached the catch — and it must not be empty, since
+ * a failure reported as no message is the same defect as one reported as success.
+ */
+export function errorMessageFrom(stdout: string, stderr: string, script: string | undefined): string {
+  const marked = stdout.split(/\r?\n/).find((l) => l.startsWith(PWSH_ERROR_MARKER))
+  if (marked) return marked.slice(PWSH_ERROR_MARKER.length).trim()
+  const rest = (stdout + readableStderr(stderr, script)).trim()
+  return rest || 'powershell failed without producing a message'
+}
+
+/** What `-EncodedCommand` takes: UTF-16LE code units, base64, no BOM. Exported so the real-process
+ *  smoke test encodes through exactly this function rather than a second copy that could drift. */
+export function encodePwshScript(script: string): string {
+  return Buffer.from(script, 'utf16le').toString('base64')
+}
 const DEFAULT_FOLDER = '\\ChronosUI\\'
 
 export interface TaskSchedulerAdapterOpts {
@@ -79,10 +169,20 @@ export class TaskSchedulerAdapter implements SchedulerAdapter {
     this.folder = opts.taskFolder ?? DEFAULT_FOLDER
   }
 
-  // Run a PowerShell script via the injected exec. Prepends Stop so a
-  // non-terminating cmdlet error becomes a non-zero exit (architect D2).
+  // Run a PowerShell script via the injected exec. Prepends Stop so a non-terminating cmdlet error
+  // becomes a non-zero exit (architect D2) — whether that actually holds is a property of the
+  // delivery mode, which is why it is the first thing the Windows checklist re-tests.
   private async ps(script: string): Promise<{ stdout: string; exitCode: number }> {
-    return this.opts.exec('powershell.exe', PS_ARGS, `$ErrorActionPreference = 'Stop'\n` + script)
+    const encoded = encodePwshScript(wrapPwshScript(script))
+    if (encoded.length > PS_MAX_ENCODED_LEN) {
+      // Shaped like a PowerShell failure so every caller's existing non-zero handling reports it,
+      // rather than adding a second error channel none of them read.
+      return {
+        stdout: `script too long for the Windows command line: ${encoded.length} encoded characters, limit ${PS_MAX_ENCODED_LEN}`,
+        exitCode: 1
+      }
+    }
+    return this.opts.exec('powershell.exe', [...PS_BASE_ARGS, encoded])
   }
 
   private taskName(chronosId: number): string {
@@ -482,12 +582,32 @@ if (Get-ScheduledTask -TaskName '${name}' -TaskPath '${this.folder}' -ErrorActio
   }
 }
 
-// Real ExecFn: runs PowerShell with the script piped via stdin (-Command -). On
-// success returns clean stdout (JSON); on failure folds stderr in for the error
-// message. Used by the app (Plan 5 wires it); tests use a fake instead.
+// Real ExecFn: runs PowerShell with the script already encoded into `args` (-EncodedCommand). On
+// success returns clean stdout (JSON); on failure folds stderr in for the error message. Used by
+// the app (Plan 5 wires it); tests use a fake instead.
+//
+// The stdin parameter stays in ExecFn because the crontab adapter still needs it (`crontab -`), but
+// nothing may deliver a PowerShell script that way again — so this throws rather than quietly
+// accepting it. Left merely unused, the path would be an invitation to reconnect the silent failure
+// that -EncodedCommand exists to remove, and no test would catch it: the fake exec accepted stdin
+// happily for as long as the bug existed.
+/** The script this call sent, read back out of its own -EncodedCommand argument. */
+function decodeSentScript(args: string[]): string | undefined {
+  const i = args.indexOf('-EncodedCommand')
+  if (i < 0 || !args[i + 1]) return undefined
+  try {
+    return Buffer.from(args[i + 1], 'base64').toString('utf16le')
+  } catch {
+    return undefined // not our shape; readableStderr then leaves the message as it found it
+  }
+}
+
 export function makePowerShellExec(): ExecFn {
-  return (cmd, args, stdin) =>
-    new Promise((resolve) => {
+  return (cmd, args, stdin) => {
+    if (stdin !== undefined) {
+      throw new Error('makePowerShellExec: script delivery via stdin is not supported — use -EncodedCommand')
+    }
+    return new Promise((resolve) => {
       const child = spawn(cmd, args)
       let stdout = ''
       let stderr = ''
@@ -496,11 +616,13 @@ export function makePowerShellExec(): ExecFn {
       child.on('error', (err) => resolve({ stdout: (err as Error).message, exitCode: 1 }))
       child.on('close', (code) => {
         const ok = (code ?? 1) === 0
-        resolve({ stdout: ok ? stdout : stdout + stderr, exitCode: code ?? 1 })
+        // On failure this string is put in front of the user. PowerShell answers with CLIXML
+        // whenever stderr is redirected, and echoes the script inside it — under -EncodedCommand
+        // that is the whole script on one line, job command included. The script is recovered from
+        // the argument we just sent rather than threaded through, so the echo is matched exactly
+        // instead of guessed at from the surrounding line furniture, which is localized.
+        resolve({ stdout: ok ? stdout : errorMessageFrom(stdout, stderr, decodeSentScript(args)), exitCode: code ?? 1 })
       })
-      if (stdin !== undefined && child.stdin) {
-        child.stdin.write(stdin)
-        child.stdin.end()
-      }
     })
+  }
 }

@@ -3,10 +3,17 @@ import { describe, it, expect } from 'vitest'
 import { TaskSchedulerAdapter } from '../../src/main/scheduler/task-scheduler.adapter'
 import type { ExecFn } from '../../src/main/scheduler/types'
 
+// The adapter delivers its script through -EncodedCommand, not stdin. Reading stdin here would
+// silently record an empty string for every call and let the assertions below pass on nothing.
+function decodeScript(args: readonly string[]): string {
+  const i = args.indexOf('-EncodedCommand')
+  return i < 0 ? '' : Buffer.from(args[i + 1], 'base64').toString('utf16le')
+}
+
 function recExec() {
   const scripts: string[] = []
-  const exec = async (_cmd: string, _args: string[], stdin?: string) => {
-    scripts.push(stdin ?? '')
+  const exec = async (_cmd: string, args: string[]) => {
+    scripts.push(decodeScript(args))
     return { stdout: '', exitCode: 0 }
   }
   return { exec, scripts }
@@ -48,8 +55,8 @@ describe('task-scheduler list() excludes flush task', () => {
   const FOLDER = '\\ChronosUI\\'
 
   function makeListExec(listJson: string) {
-    const exec = async (_cmd: string, _args: string[], stdin?: string) => {
-      const script = stdin ?? ''
+    const exec = async (_cmd: string, args: string[]) => {
+      const script = decodeScript(args)
       // list() build script: has Get-ScheduledTask + ConvertTo-Json + -notlike
       if (/ConvertTo-Json/.test(script) && /-notlike/.test(script)) {
         return { stdout: listJson, exitCode: 0 }

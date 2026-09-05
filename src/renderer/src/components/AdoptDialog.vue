@@ -1,9 +1,14 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
+import { hostPlatform, schedulerLabel } from '../lib/scheduler-label'
+const nativeScheduler = computed(() => schedulerLabel(hostPlatform()))
 
 const props = defineProps<{
   open: boolean
+  /** Why the last attempt failed. Rendered inside the modal: this dialog covers the whole viewport,
+   *  so a message placed anywhere else on the page is behind it and the user sees nothing. */
+  error?: string | null
   schedule: string
   command: string
   defaultName: string
@@ -49,7 +54,8 @@ function onAdopt() {
         </div>
         <label>Name<input v-model="name" data-f="name" class="in" :placeholder="defaultName" /></label>
         <label>Category<input v-model="category" data-f="category" class="in" /></label>
-        <p class="note">ChronosUI will wrap this existing cron line so it can record runs — fully reversible.</p>
+        <p class="note">ChronosUI will wrap this existing {{ nativeScheduler }} entry so it can record runs — fully reversible.</p>
+        <p v-if="error" data-adopt-error class="dialog-err">{{ error }}</p>
       </div>
       <footer>
         <button data-cancel class="btn" type="button" @click="emit('cancel')">Cancel</button>
@@ -60,6 +66,7 @@ function onAdopt() {
 </template>
 
 <style scoped>
+.dialog-err{margin:0;font-size:12px;color:var(--color-danger-text)}
 .overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);display:grid;place-items:center;z-index:100}
 .modal{width:560px;background:var(--color-surface);border:1px solid var(--color-border);border-radius:10px;overflow:hidden}
 header,footer{padding:var(--p-space-4);border-bottom:1px solid var(--color-border)}footer{border-bottom:0;border-top:1px solid var(--color-border);display:flex;justify-content:flex-end;gap:10px}
