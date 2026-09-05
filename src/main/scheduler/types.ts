@@ -61,6 +61,27 @@ export interface BatchWriteResult {
   adopted: number[]
 }
 
+/** teardown 用：把一個 job 從 ChronosUI 的管理中釋放。adopted 會還原原指令，created 只拆標記。 */
+export interface ReleaseSpec {
+  chronosId: number
+  originalCommand: string // 來自 DB 的原始指令；created job 用不到，但一併帶著讓 adapter 不必回查
+}
+
+/**
+ * releaseAll 的結果。`skipped` = 原生排程器裡已經找不到的（外部刪除/drift），**不算失敗**：
+ * teardown 是使用者的離開路徑，不可被一筆無關的外部改動卡住（adoptMany 的 no_match abort 語意
+ * 刻意不同，因為 adopt 是可重試的選配動作）。
+ */
+export interface ReleaseResult {
+  ok: boolean
+  reason?: 'drift' | 'error'
+  drift?: DriftResult
+  error?: string
+  errorCode?: KnownErrorCode
+  released: number[]
+  skipped: { chronosId: number; reason: 'no_match' }[]
+}
+
 export interface AdoptOptions {
   scheduleExpr: string
   command: string // the original command to wrap
@@ -86,6 +107,9 @@ export interface SchedulerAdapter {
   /** Adopt several unmanaged lines in one write (crontab: single read-modify-write; Windows: per-task). */
   adoptMany(specs: AdoptionSpec[]): Promise<BatchWriteResult>
   unadopt(chronosId: number, originalCommand: string): Promise<WriteResult>
+  /** Release every listed job from ChronosUI management (teardown). crontab: one read-modify-write;
+   *  Windows: per-task. Jobs missing from the native scheduler go to `skipped`, not an abort. */
+  releaseAll(specs: ReleaseSpec[]): Promise<ReleaseResult>
   detectDrift(): Promise<DriftResult>
   /** Install (or replace) the managed flush cron entry that runs `schedmgr notify-flush` every windowMin minutes. */
   installFlushEntry(windowMin: number): Promise<WriteResult>

@@ -64,6 +64,67 @@ Un-adopt restores the bare original line and removes the marker — one click, f
 */5 * * * * /usr/bin/python3 backup.py
 ```
 
+To do this for every job at once, see [Uninstalling](#uninstalling) below.
+
+## Uninstalling
+
+Deleting ChronosUI does not delete your cron jobs, but it does stop the adopted ones from running.
+The wrapped line points at `schedmgr` inside the app bundle, so once the app is gone cron still
+fires on schedule and gets `No such file or directory`. The schedule is intact; the job fails.
+
+Nothing is lost: your original command is still in the crontab line, after the `--`.
+
+### The clean way
+
+**Settings → Remove ChronosUI** does all of it in one step: every adopted job goes back to its
+original crontab line, every job created here keeps running with only the `# chronos:` marker
+removed, and the notification entry is removed. It also offers to delete the local database and
+settings; leaving that unchecked keeps your run history for a reinstall.
+
+It cannot be undone, so it asks first. Do it before dragging the app to the trash.
+
+### If the app is already gone
+
+Edit your crontab by hand with `crontab -e`. What to do depends on which kind of line it is, and the
+two are not the same:
+
+**An adopted job** has a wrapper. Delete the `# chronos:<id>` marker line and replace the wrapped
+line with the schedule plus your original command, which is the single-quoted argument after `--`:
+
+```cron
+# chronos:42
+*/5 * * * * '/path/to/schedmgr' run 42 --db '/path/to/chronos.db' -- '/usr/bin/python3 backup.py'
+```
+
+becomes:
+
+```cron
+*/5 * * * * /usr/bin/python3 backup.py
+```
+
+**A job created in ChronosUI** was never wrapped. Its command line is already the plain one, so
+there is nothing to unwrap: delete the `# chronos:<id>` marker line above it and leave the rest
+alone. Such a job keeps running normally even if you do nothing at all.
+
+A line starting with `#` before the schedule means the job was disabled; keep that `#` if you want
+it to stay disabled.
+
+### What deleting the app leaves behind
+
+| What | Where | Status |
+|---|---|---|
+| Notification LaunchAgent (macOS) | `~/Library/LaunchAgents/com.augustusw.chronos-ui.notify-flush.plist` | Removes itself. The agent checks whether the app bundle is still there and, after three consecutive misses, deletes its own plist and unloads. Allow up to 15 minutes. |
+| notify-flush entry (Linux) | your crontab, under the `# chronos:notify-flush` marker | Manual: `crontab -e` and delete the marker together with the `schedmgr notify-flush` line under it. |
+| Scheduled task (Windows) | the `\ChronosUI\` task folder | Manual: remove it in Task Scheduler. Windows has no self-clean yet. |
+| Database and settings | the app's user-data directory (`~/Library/Application Support/` on macOS) | Kept unless teardown was told to delete it. Keep it if you plan to reinstall. |
+
+If you want the macOS LaunchAgent gone immediately rather than waiting:
+
+```bash
+launchctl bootout gui/$(id -u)/com.augustusw.chronos-ui.notify-flush
+rm ~/Library/LaunchAgents/com.augustusw.chronos-ui.notify-flush.plist
+```
+
 ## Backward compatibility
 
 Crontab lines written by an older ChronosUI used an unquoted `schedmgr` path. ChronosUI still

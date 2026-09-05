@@ -11,6 +11,11 @@
 // Mirrors the Go reader (schedmgr/secret.go resolveDSNWith / readSecretFile): keychain first, then
 // a 0600 <sanitizeService(service)>.dsn fallback file. Electron-free + exec injected, so it is
 // unit-testable headlessly.
+//
+// Note the asymmetry between the two sides: READING is keychain-first-then-file, but WRITING stores
+// to both. The writer runs in the GUI session and the reader (schedmgr) runs from cron, which has no
+// keychain access — so a write that stops at the keychain leaves the reader with nothing. See
+// pgSecretStore.
 
 import { mkdirSync, writeFileSync, readFileSync, chmodSync, unlinkSync } from 'node:fs'
 import { sep, join } from 'node:path'
@@ -59,12 +64,29 @@ export interface PgSecretDeps {
   configDir: string
 }
 
-/** Store a Postgres DSN under `service`: keychain-first (mirroring the Go reader), falling back to
- *  a 0600 file on an unsupported platform or a keychain-write failure. */
+/**
+ * Store a Postgres DSN under `service`: the keychain where the platform has one, AND the 0600
+ * fallback file — always, never one or the other.
+ *
+ * This used to return as soon as the keychain write succeeded, which is correct only if whoever
+ * reads the secret shares this process's keychain access. schedmgr does not: it runs from cron,
+ * outside the GUI security session, where `security find-generic-password` exits 44 on an item the
+ * app itself reads without trouble. With no fallback file to fall back to, every scheduled run then
+ * failed to open the database and recorded nothing — silently, because the run itself still went
+ * ahead. Measured on a real machine 2026-09-05: seven weeks of run history lost that way.
+ *
+ * Writing both means the plaintext copy always exists, so for this particular secret the keychain
+ * adds no protection it did not already lack: a credential an unattended cron job must read cannot
+ * be guarded by a user-session keychain in the first place. The real boundary is the 0600 mode.
+ * Windows already worked this way (secret_windows.go implements no keychain write), so this aligns
+ * macOS and Linux with it rather than introducing a new shape.
+ *
+ * A failed keychain write is no longer fatal or even interesting: the fallback file below is
+ * written either way, and pgSecretRead consults it when the keychain comes up empty.
+ */
 export async function pgSecretStore(service: string, dsn: string, deps: PgSecretDeps): Promise<void> {
   if (keychainWriteSupported(deps.platform)) {
-    const stored = await keychainStore(deps.exec, deps.platform, service, KEYCHAIN_ACCOUNT, dsn)
-    if (stored) return
+    await keychainStore(deps.exec, deps.platform, service, KEYCHAIN_ACCOUNT, dsn)
   }
   const path = pgSecretFallbackPath(deps.configDir, service)
   mkdirSync(deps.configDir, { recursive: true })

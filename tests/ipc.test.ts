@@ -3,6 +3,7 @@ import {
   handleGetVersion, handleJobsCreate, handleJobsUpdate, handleJobsAdopt, handleJobsRunNowStreaming, handleJobsRunBatchCancel, handleRunsRecent, handleNotifySave,
   handlePgTestConnection, handlePgSaveSwitch, handlePgGetStatus, handleDashboardSummary,
   handleRunsSearch, handleJobsRunDurationTrend, handleJobsExportYaml, handleJobsImportPreview, handleJobsImportApply,
+  handleAppTeardown,
   MAX_BATCH_ADOPT, MAX_RUN_LIST_LIMIT, type IpcDeps
 } from '../src/main/ipc'
 import type { DashboardSummary } from '../src/shared/ipc-contract'
@@ -479,5 +480,48 @@ describe('handleJobsImportApply (v0.4.0)', () => {
     const r = await handleJobsImportApply(d, { entries })
     expect(r).toEqual({ ok: true, created: 1, updated: 0, errors: [] })
     expect(got).toEqual(entries)
+  })
+})
+
+describe('handleAppTeardown', () => {
+  function teardownDeps() {
+    const calls: unknown[] = []
+    const d = deps({
+      service: {
+        teardown: async (opts: { deleteData: boolean }) => {
+          calls.push(opts)
+          return { ok: true, released: [], skipped: [] }
+        }
+      } as unknown as IpcDeps['service']
+    })
+    return { d, calls }
+  }
+
+  it('rejects a non-boolean deleteData without touching the service', async () => {
+    const { d, calls } = teardownDeps()
+    const r = await handleAppTeardown(d, { deleteData: 'yes' })
+    expect(r.ok).toBe(false)
+    expect(calls).toEqual([])
+  })
+
+  it('rejects a missing deleteData', async () => {
+    const { d, calls } = teardownDeps()
+    const r = await handleAppTeardown(d, {})
+    expect(r.ok).toBe(false)
+    expect(calls).toEqual([])
+  })
+
+  it('forwards ONLY deleteData — any path the renderer supplies is dropped', async () => {
+    const { d, calls } = teardownDeps()
+    await handleAppTeardown(d, { deleteData: true, dbPath: '/etc/passwd', configPath: '/etc/hosts' })
+    // 若 handler 改成整包透傳，這裡就會多出那兩個欄位而爆掉
+    expect(calls).toEqual([{ deleteData: true }])
+  })
+
+  it('passes a valid false through', async () => {
+    const { d, calls } = teardownDeps()
+    const r = await handleAppTeardown(d, { deleteData: false })
+    expect(r.ok).toBe(true)
+    expect(calls).toEqual([{ deleteData: false }])
   })
 })

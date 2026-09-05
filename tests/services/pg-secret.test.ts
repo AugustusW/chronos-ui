@@ -52,7 +52,7 @@ describe('pgSecretStore / pgSecretRead / pgSecretDelete', () => {
     ...over
   })
 
-  it('branches to the keychain on darwin (mock execFn + platform) and skips the fallback file on success', async () => {
+  it('writes the keychain item on darwin AND the fallback file — the reader is cron, not this session', async () => {
     const exec = vi.fn(async () => ({ code: 0, stdout: '' }))
     const d = deps({ exec, platform: 'darwin' })
     await pgSecretStore('svc-a', 'postgresql://u:p@h/db', d)
@@ -61,7 +61,24 @@ describe('pgSecretStore / pgSecretRead / pgSecretDelete', () => {
       ['add-generic-password', '-U', '-s', 'svc-a', '-a', 'chronos-ui', '-w', 'postgresql://u:p@h/db'],
       undefined
     )
-    expect(existsSync(pgSecretFallbackPath(dir, 'svc-a'))).toBe(false)
+    // This assertion used to be toBe(false): a successful keychain write returned early and the
+    // fallback file was never created. That is correct only if whoever reads the secret shares this
+    // process's keychain access — and schedmgr does not. It runs from cron, outside the GUI security
+    // session, where `security` exits 44 on an item this session reads fine. Measured on a real
+    // machine 2026-09-05: seven weeks of run_logs silently lost to exactly this.
+    const path = pgSecretFallbackPath(dir, 'svc-a')
+    expect(existsSync(path)).toBe(true)
+    expect(readFileSync(path, 'utf8')).toBe('postgresql://u:p@h/db')
+  })
+
+  it('keeps the fallback file 0600 on the keychain-success path too', async () => {
+    // The keychain path is the one that now also touches disk, so it needs its own mode check —
+    // the pre-existing 0600 test only covers the win32 (no-keychain) branch.
+    const exec = vi.fn(async () => ({ code: 0, stdout: '' }))
+    await pgSecretStore('svc-a2', 'dsn', deps({ exec, platform: 'darwin' }))
+    if (process.platform !== 'win32') {
+      expect(statSync(pgSecretFallbackPath(dir, 'svc-a2')).mode & 0o777).toBe(0o600)
+    }
   })
 
   it('falls back to the 0600 file when the platform has no keychain (win32), without invoking exec', async () => {

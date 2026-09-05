@@ -1,14 +1,17 @@
 <!-- SettingsView.vue · SPDX-License-Identifier: Apache-2.0 -->
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import ThemeToggle from '../components/ThemeToggle.vue'
 import ImportPreviewDialog from '../components/ImportPreviewDialog.vue'
+import TeardownDialog from '../components/TeardownDialog.vue'
+import { useScheduleStore } from '../stores/schedule.store'
 import { useNotifyStore } from '../stores/notify.store'
 import { useDbSettingsStore } from '../stores/dbsettings.store'
 import { api } from '../ipc/api'
 import type { ImportPreview } from '../../../shared/ipc-contract'
 const n = useNotifyStore()
 const db = useDbSettingsStore()
+const sched = useScheduleStore()
 onMounted(() => { n.load(); db.load() })
 
 const BACKEND_LABEL: Record<'sqlite' | 'postgres', string> = { sqlite: 'SQLite', postgres: 'PostgreSQL' }
@@ -62,6 +65,59 @@ async function confirmImport(): Promise<void> {
 function cancelImport(): void {
   importOpen.value = false
   importPreview.value = null
+}
+// --- Teardown (Remove ChronosUI) -------------------------------------------------------------
+const teardownOpen = ref(false)
+const teardownCounting = ref(false)
+const teardownBusy = ref(false)
+const teardownError = ref<string | null>(null)
+const teardownNotice = ref<string | null>(null)
+
+const adoptedCount = computed(() => sched.items.filter((i) => i.job?.adopted).length)
+const createdCount = computed(() => sched.items.filter((i) => i.job && !i.job.adopted).length)
+
+async function openTeardown(): Promise<void> {
+  teardownError.value = null
+  teardownOpen.value = true
+  // Settings can be the first screen someone opens. Without this the dialog would confidently say
+  // "0 jobs" when the truth is "nothing has been scanned yet" — a wrong number is worse than a wait.
+  if (!sched.hasScanned) {
+    teardownCounting.value = true
+    try {
+      await sched.refresh()
+    } finally {
+      teardownCounting.value = false
+    }
+  }
+}
+
+async function confirmTeardown(deleteData: boolean): Promise<void> {
+  teardownBusy.value = true
+  teardownError.value = null
+  teardownNotice.value = null
+  try {
+    const r = await api.teardown(deleteData)
+    teardownOpen.value = false
+    if (!r.ok) {
+      teardownError.value = r.error ?? 'Teardown failed.'
+      return
+    }
+    // A fully clean teardown quits the app, so nothing below renders. If anything was left behind the
+    // main process deliberately stays alive — this is the only surface that can report it.
+    const notes: string[] = []
+    if (r.skipped.length) {
+      notes.push(`${r.skipped.length} job(s) were already gone from the scheduler and were left alone.`)
+    }
+    if (r.deleteFailed.length) {
+      notes.push(`Could not delete: ${r.deleteFailed.join(', ')}. Remove them by hand after quitting.`)
+    }
+    if (notes.length) {
+      teardownNotice.value = `${notes.join(' ')} Everything else was released; quit the app when ready.`
+      await sched.refresh()
+    }
+  } finally {
+    teardownBusy.value = false
+  }
 }
 </script>
 <template>
@@ -159,6 +215,23 @@ function cancelImport(): void {
       <div v-if="exportStatus" class="row muted" data-test="export-status">{{ exportStatus }}</div>
       <div v-if="importStatus" class="row muted" data-test="import-status">{{ importStatus }}</div>
     </section>
+    <section>
+      <h2>Remove ChronosUI</h2>
+      <div class="row muted">
+        Hands every job back to the native scheduler and removes everything ChronosUI added, so
+        nothing breaks after the app is deleted. Do this before dragging the app to the trash.
+      </div>
+      <div class="row">
+        <button class="danger" data-teardown-open @click="openTeardown">Remove ChronosUI…</button>
+      </div>
+      <div v-if="teardownError" class="row err" data-teardown-error>{{ teardownError }}</div>
+      <div v-if="teardownNotice" class="row warn" data-teardown-notice>{{ teardownNotice }}</div>
+    </section>
+    <TeardownDialog
+      :open="teardownOpen" :adopted-count="adoptedCount" :created-count="createdCount"
+      :counting="teardownCounting" :busy="teardownBusy"
+      @confirm="confirmTeardown" @cancel="teardownOpen = false"
+    />
     <ImportPreviewDialog
       :open="importOpen" :preview="importPreview" :applying="importApplying"
       @confirm="confirmImport" @cancel="cancelImport"
@@ -170,6 +243,7 @@ function cancelImport(): void {
 h1{font-size:16px}h2{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--color-text-muted);margin-top:var(--p-space-4)}
 .row{display:flex;align-items:center;gap:10px;padding:8px 0}.muted{color:var(--color-text-muted)}
 .err{color:var(--color-danger)}
+button.danger{color:var(--color-danger);border-color:var(--color-danger)}
 .ok{color:var(--color-ok-text)}
 .warn{color:var(--color-warn-text);font-size:12px;line-height:1.4}
 input[type=text],input[type=password],input[type=number],select{flex:1;min-width:0}

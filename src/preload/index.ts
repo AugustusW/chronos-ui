@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
-import { IPC } from '../shared/ipc-contract'
+import { IPC, type TeardownResult } from '../shared/ipc-contract'
 import type {
   AppVersion, ReconcileResult, CreateJobInput, UpdateJobChanges, AdoptItem, RunNowResult, Job, RunLog, WriteResult, BatchWriteResult, RunEvent,
   NotifySettingsDTO, NotifySaveInput, SaveResult, PgDsnParts, PgSaveSwitchInput, PgSaveSwitchResult, TestConnectionResult, PgStatus, DashboardSummary,
@@ -19,6 +19,7 @@ const api = {
   deleteJob: (id: number): Promise<WriteResult> => ipcRenderer.invoke(IPC.jobsDelete, { id }),
   adoptJobs: (items: AdoptItem[]): Promise<BatchWriteResult> => ipcRenderer.invoke(IPC.jobsAdopt, { items }),
   unadoptJob: (id: number): Promise<WriteResult> => ipcRenderer.invoke(IPC.jobsUnadopt, { id }),
+  teardown: (deleteData: boolean): Promise<TeardownResult> => ipcRenderer.invoke(IPC.appTeardown, { deleteData }),
   forgetJob: (id: number): Promise<WriteResult> => ipcRenderer.invoke(IPC.jobsForget, { id }),
   runNow: (id: number): Promise<RunNowResult> => ipcRenderer.invoke(IPC.jobsRunNow, { id }),
   listRuns: (jobId: number, limit?: number): Promise<RunLog[]> => ipcRenderer.invoke(IPC.runsListForJob, { jobId, limit }),

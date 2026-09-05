@@ -11,7 +11,9 @@ function fakeAdapter(over: Partial<SchedulerAdapter> = {}): SchedulerAdapter {
   return {
     list: async () => [], createJob: ok, updateJob: ok, enableJob: ok, disableJob: ok,
     deleteJob: ok, adopt: ok, unadopt: ok, detectDrift: async () => ({ drifted: false, currentHash: '', expectedHash: '' }),
-    adoptMany: async () => ({ ok: true, adopted: [] }), ...over
+    adoptMany: async () => ({ ok: true, adopted: [] }),
+    releaseAll: async () => ({ ok: true, released: [], skipped: [] }),
+    installFlushEntry: ok, removeFlushEntry: ok, ...over
   }
 }
 
@@ -19,6 +21,49 @@ function svc(adapter: SchedulerAdapter) {
   const h = makeTestDb()
   const repos = createRepositories(h)
   return { h, service: createJobsService({ repos, adapter, platform: 'darwin', schedmgrPath: '/opt/schedmgr', dbPath: ':memory:' }) }
+}
+
+/** svc() plus the teardown-only deps, each recording what it was asked to do. */
+function svcForTeardown(
+  adapter: SchedulerAdapter,
+  over: { rmFile?: ((p: string) => void) | undefined } = {}
+) {
+  const h = makeTestDb()
+  const repos = createRepositories(h)
+  const order: string[] = []
+  const removedFiles: string[] = []
+  let quitCalled = false
+  const flush = {
+    removeCalled: false,
+    install: async () => ({ ok: true }),
+    remove: async () => {
+      flush.removeCalled = true
+      order.push('flushRemove')
+      return { ok: true }
+    }
+  }
+  const service = createJobsService({
+    repos,
+    adapter,
+    platform: 'darwin',
+    schedmgrPath: '/opt/schedmgr',
+    dbPath: 'pg:keychain:com.x/pg-dsn', // schedmgr descriptor, NOT a file — teardown must not delete this
+    sqliteDbPath: '/userData/chronos.db',
+    configPath: '/userData/chronos-config.json',
+    rmFile:
+      'rmFile' in over
+        ? over.rmFile
+        : (p: string) => {
+            removedFiles.push(p)
+            order.push('rmFile')
+          },
+    flush,
+    quit: () => {
+      quitCalled = true
+      order.push('quit')
+    }
+  })
+  return { h, service, order, removedFiles, flush, quitCalled: () => quitCalled }
 }
 
 describe('jobs.service create', () => {
@@ -186,5 +231,157 @@ describe('jobs.service update', () => {
     expect(r.ok).toBe(false)
     expect(getJob(h.db, created.job!.id)?.command).toBe('/b.sh')
     h.close()
+  })
+})
+
+describe('jobs.service teardown', () => {
+  async function seedTwoJobs(service: ReturnType<typeof svcForTeardown>['service']) {
+    await service.create({ name: 'A', scheduleExpr: '0 3 * * *', command: '/a.sh' })
+    await service.create({ name: 'B', scheduleExpr: '0 4 * * *', command: '/b.sh' })
+  }
+
+  it('deletes NOTHING when releaseAll fails', async () => {
+    const t = svcForTeardown(
+      fakeAdapter({ releaseAll: async () => ({ ok: false, reason: 'drift', released: [], skipped: [] }) })
+    )
+    await seedTwoJobs(t.service)
+    const r = await t.service.teardown({ deleteData: true })
+    expect(r.ok).toBe(false)
+    expect(t.removedFiles).toEqual([]) // 一個檔都不能刪
+    expect(t.flush.removeCalled).toBe(false) // flush 也不能動
+    expect(t.quitCalled()).toBe(false)
+    t.h.close()
+  })
+
+  it('deleteData=false removes the flush entry but keeps the data files', async () => {
+    const t = svcForTeardown(fakeAdapter())
+    await seedTwoJobs(t.service)
+    const r = await t.service.teardown({ deleteData: false })
+    expect(r.ok).toBe(true)
+    expect(t.flush.removeCalled).toBe(true)
+    expect(t.removedFiles).toEqual([])
+    t.h.close()
+  })
+
+  it('deleteData=true deletes exactly the injected db and config paths', async () => {
+    const t = svcForTeardown(fakeAdapter())
+    await seedTwoJobs(t.service)
+    await t.service.teardown({ deleteData: true })
+    expect([...t.removedFiles].sort()).toEqual(['/userData/chronos-config.json', '/userData/chronos.db'])
+    t.h.close()
+  })
+
+  it('quits the app after a successful teardown', async () => {
+    const t = svcForTeardown(fakeAdapter())
+    await seedTwoJobs(t.service)
+    await t.service.teardown({ deleteData: false })
+    expect(t.quitCalled()).toBe(true)
+    t.h.close()
+  })
+
+  it('reads the jobs before releasing, and releases before deleting files', async () => {
+    const seen: number[] = []
+    const t = svcForTeardown(
+      fakeAdapter({
+        releaseAll: async (specs) => {
+          seen.push(...specs.map((s) => s.chronosId))
+          t.order.push('releaseAll')
+          return { ok: true, released: specs.map((s) => s.chronosId), skipped: [] }
+        }
+      })
+    )
+    await seedTwoJobs(t.service)
+    await t.service.teardown({ deleteData: true })
+    // 必須先讀得到兩個 job 才能還原它們 — 刪完資料就沒有這個資訊了
+    expect(seen).toHaveLength(2)
+    expect(t.order.indexOf('releaseAll')).toBeLessThan(t.order.indexOf('rmFile'))
+    t.h.close()
+  })
+
+  it('passes each job original command through to the adapter', async () => {
+    let got: { chronosId: number; originalCommand: string }[] = []
+    const t = svcForTeardown(
+      fakeAdapter({
+        releaseAll: async (specs) => {
+          got = specs
+          return { ok: true, released: specs.map((s) => s.chronosId), skipped: [] }
+        }
+      })
+    )
+    await seedTwoJobs(t.service)
+    await t.service.teardown({ deleteData: false })
+    expect(got.map((g) => g.originalCommand).sort()).toEqual(['/a.sh', '/b.sh'])
+    t.h.close()
+  })
+
+  it('surfaces skipped jobs to the caller', async () => {
+    const t = svcForTeardown(
+      fakeAdapter({
+        releaseAll: async (specs) => ({
+          ok: true,
+          released: [specs[0].chronosId],
+          skipped: [{ chronosId: specs[1].chronosId, reason: 'no_match' as const }]
+        })
+      })
+    )
+    await seedTwoJobs(t.service)
+    const r = await t.service.teardown({ deleteData: false })
+    expect(r.ok).toBe(true)
+    expect(r.skipped).toHaveLength(1)
+    t.h.close()
+  })
+})
+
+describe('jobs.service teardown — what it must NOT hide', () => {
+  it('does not quit when jobs were skipped: that list is the only thing left to show', async () => {
+    const t = svcForTeardown(
+      fakeAdapter({
+        releaseAll: async (specs) => ({
+          ok: true,
+          released: [],
+          skipped: specs.map((s) => ({ chronosId: s.chronosId, reason: 'no_match' as const }))
+        })
+      })
+    )
+    await t.service.create({ name: 'A', scheduleExpr: '0 3 * * *', command: '/a.sh' })
+    const r = await t.service.teardown({ deleteData: false })
+    expect(r.ok).toBe(true)
+    expect(r.skipped).toHaveLength(1)
+    expect(t.quitCalled()).toBe(false)
+    t.h.close()
+  })
+
+  it('reports a file it could not delete and stays open instead of quitting', async () => {
+    const t = svcForTeardown(fakeAdapter(), {
+      rmFile: (p: string) => {
+        if (p.endsWith('chronos.db')) throw Object.assign(new Error('EBUSY'), { code: 'EBUSY' })
+      }
+    })
+    await t.service.create({ name: 'A', scheduleExpr: '0 3 * * *', command: '/a.sh' })
+    const r = await t.service.teardown({ deleteData: true })
+    expect(r.deleteFailed).toEqual(['/userData/chronos.db'])
+    expect(t.quitCalled()).toBe(false)
+    t.h.close()
+  })
+
+  it('still deletes the other file when one of them fails', async () => {
+    const t = svcForTeardown(fakeAdapter(), {
+      rmFile: (p: string) => {
+        if (p.endsWith('chronos.db')) throw new Error('EBUSY')
+        t.removedFiles.push(p)
+      }
+    })
+    await t.service.teardown({ deleteData: true })
+    expect(t.removedFiles).toEqual(['/userData/chronos-config.json'])
+    t.h.close()
+  })
+
+  it('refuses rather than silently skipping when asked to delete with no remover wired', async () => {
+    const t = svcForTeardown(fakeAdapter(), { rmFile: undefined })
+    const r = await t.service.teardown({ deleteData: true })
+    expect(r.ok).toBe(false)
+    expect(r.error).toMatch(/file remover/i)
+    expect(t.quitCalled()).toBe(false)
+    t.h.close()
   })
 })

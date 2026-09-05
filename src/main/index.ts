@@ -4,6 +4,7 @@ import { join } from 'path'
 import { pathToFileURL } from 'node:url'
 import { installCrashGuards } from './crash-guards'
 import { buildMainDeps, BootPgUnreachableError, handleBootPgUnreachable, type BuiltDeps } from './bootstrap'
+import { createQuitGuard } from './quit-guard'
 import { registerIpcHandlers } from './ipc'
 import { startCheckpointTimer, startRetentionSweep, pgQuitDrain } from './db/lifecycle'
 import { watchDbForChanges } from './db/watch'
@@ -25,7 +26,7 @@ let stopWatch: (() => void) | null = null
 let poll: ReturnType<typeof setInterval> | null = null
 let tray: TrayHandle | null = null        // module-scope so V8 doesn't GC the Tray (architect I4)
 let nativeNotify: NativeNotifyHandle | null = null
-let isQuitting = false
+const quitGuard = createQuitGuard({ quit: () => app.quit(), platform: process.platform })
 
 function createWindow(): void {
   const win = new BrowserWindow({
@@ -41,7 +42,7 @@ function createWindow(): void {
   })
   win.on('ready-to-show', () => win.show())
   win.on('close', (e) => {
-    if (!isQuitting && process.platform !== 'darwin') { e.preventDefault(); win.hide() }
+    if (quitGuard.shouldInterceptClose()) { e.preventDefault(); win.hide() }
   })
   // Navigation lockdown (code review #3): deny in-app popups (open http(s) in the OS browser instead)
   // and prevent the main window from being navigated away from the app's own page.
@@ -60,6 +61,7 @@ app.whenReady().then(async () => {
     getWebContents: () => BrowserWindow.getAllWindows()[0]?.webContents,
     relaunchApp: () => app.relaunch(),
     exitApp: () => app.exit(),
+    quitApp: () => quitGuard.requestQuit(),
     // v0.4.0: fan the SAME RunEvent stream the renderer gets out to the tray + native-failure
     // notifier too (neither is created yet at this point in boot — both are module-scope `let`s, so
     // this closure sees whatever they're assigned to by the time an event actually fires, same as
@@ -110,7 +112,7 @@ app.whenReady().then(async () => {
   const showWin = (): void => { const w = BrowserWindow.getAllWindows()[0]; if (w) { w.show(); w.focus() } else createWindow() }
   tray = createTray({
     onOpen: showWin,
-    onQuit: () => { isQuitting = true; app.quit() },
+    onQuit: () => quitGuard.requestQuit(),
     // Monochrome menu-bar template (#5): the "…Template" filename makes Electron auto-render it for
     // light/dark menu bars. NOT the full color app icon (which renders oversized + wrong in the tray).
     iconPath: app.isPackaged ? join(process.resourcesPath, 'trayTemplate.png') : join(__dirname, '../../build/trayTemplate.png'),
