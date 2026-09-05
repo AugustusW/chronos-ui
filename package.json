@@ -1,6 +1,6 @@
 {
   "name": "chronos-ui",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "description": "Bring Order to Time — a cross-platform desktop GUI for managing native OS schedulers.",
   "license": "Apache-2.0",
   "author": "The ChronosUI Authors",

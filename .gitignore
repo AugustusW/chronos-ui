@@ -12,3 +12,6 @@ release/
 *.tsbuildinfo
 # Staged Go binary (produced by scripts/build-schedmgr.mjs; bundled via electron-builder extraResources)
 resources/schedmgr/
+# The same binary, copied next to its source because that is where the unpackaged app reads it
+schedmgr/schedmgr
+schedmgr/schedmgr.exe

@@ -88,10 +88,16 @@ export interface UpdateJobChanges {
 
 /** Renderer → main adopt item — an unmanaged native line the user chose to take over (has no DB id yet). */
 export interface AdoptItem {
+  /** What the user wants this job called in ChronosUI. Editable in the dialog. NOT the scheduler's
+   *  own name for the task — see `native`, which the user never edits. The two share a word and
+   *  mean different things, which is the easiest wire in this flow to cross. */
   name?: string
   scheduleExpr: string
   command: string
   category?: string
+  /** The scheduler's identity for the task being adopted. Windows needs it because the task keeps
+   *  its own name and folder; crontab finds its line by schedule and command and sends none. */
+  native?: { name: string; path: string }
 }
 
 /** Manual-run outcome (architect MEDIUM #5 — discriminated union instead of a faked RunLog). */

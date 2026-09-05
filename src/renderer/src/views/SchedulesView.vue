@@ -7,7 +7,7 @@ import { api } from '../ipc/api'
 import { deriveJobName } from '../lib/format'
 import { hostPlatform, schedulerLabel } from '../lib/scheduler-label'
 const nativeScheduler = computed(() => schedulerLabel(hostPlatform()))
-import type { CreateJobInput, Job, JobListItem } from '../../../shared/ipc-contract'
+import type { CreateJobInput, Job, JobListItem, WriteResult } from '../../../shared/ipc-contract'
 import CategoryFilter from '../components/CategoryFilter.vue'
 import BatchActionBar from '../components/BatchActionBar.vue'
 import JobRow from '../components/JobRow.vue'
@@ -57,9 +57,13 @@ const counts = computed<Record<string, number>>(() => {
 })
 const isEmpty = computed(() => !loading.value && store.items.length === 0)
 function selectedJobIds(): number[] {
-  return store.items
-    .filter((it) => it.job && store.selectedIds.has(it.job.id))
-    .map((it) => it.job!.id)
+  // Unique: two scheduled tasks carrying one marker put the same job on two rows, and the batch
+  // then ran twice on it and counted it twice ("failed for 2 of 2 job(s)" for a single job).
+  return [
+    ...new Set(
+      store.items.filter((it) => it.job && store.selectedIds.has(it.job.id)).map((it) => it.job!.id)
+    )
+  ]
 }
 function exitSelect(): void {
   store.selectedIds.clear()
@@ -83,22 +87,52 @@ function cancelBatchRun(): void {
   batchCancel = true
   batchState.value = null
 }
-async function batchEnable(): Promise<void> {
-  for (const id of selectedJobIds()) { try { await api.enableJob(id) } catch { /* best-effort */ } }
+/**
+ * Run one write over the selection and say what happened.
+ *
+ * The loop still continues past a failure — one job that cannot be written must not stop the rest.
+ * What changed is that the reasons are no longer dropped: Enable and Disable exist ONLY here, so a
+ * discarded result meant a correct refusal (drift, a duplicate marker, a task that is gone) and a
+ * write that went through looked exactly the same from the outside.
+ */
+async function runBatch(label: string, op: (id: number) => Promise<WriteResult>): Promise<void> {
+  statusMsg.value = null
+  const ids = selectedJobIds()
+  const failures: { id: number; why: string }[] = []
+  for (const id of ids) {
+    try {
+      const w = await op(id)
+      if (!w.ok) failures.push({ id, why: w.error ?? w.reason ?? 'unknown error' })
+    } catch (e) {
+      failures.push({ id, why: e instanceof Error ? e.message : String(e) })
+    }
+  }
   await store.refresh()
   exitSelect()
+  if (failures.length === 0) {
+    statusMsg.value = { kind: 'ok', text: `${label} ${ids.length} job(s) ✓` }
+    return
+  }
+  const first = failures[0]
+  statusMsg.value = {
+    kind: 'err',
+    text:
+      failures.length === 1
+        ? `${label} failed for job ${first.id}: ${first.why}`
+        : `${label} failed for ${failures.length} of ${ids.length} job(s). First: job ${first.id}: ${first.why}`
+  }
+}
+
+async function batchEnable(): Promise<void> {
+  await runBatch('Enabled', (id) => api.enableJob(id))
 }
 async function batchDisable(): Promise<void> {
-  for (const id of selectedJobIds()) { try { await api.disableJob(id) } catch { /* best-effort */ } }
-  await store.refresh()
-  exitSelect()
+  await runBatch('Disabled', (id) => api.disableJob(id))
 }
 async function batchDelete(): Promise<void> {
   const n = selectedJobIds().length
   if (!window.confirm(`Delete ${n} job(s)? This permanently removes them and their ${nativeScheduler.value} entries. For jobs you didn't create in ChronosUI, use Un-adopt or Forget to keep the entry.`)) return
-  for (const id of selectedJobIds()) { try { await api.deleteJob(id) } catch { /* best-effort */ } }
-  await store.refresh()
-  exitSelect()
+  await runBatch('Deleted', (id) => api.deleteJob(id))
 }
 function openNew(): void {
   statusMsg.value = null
@@ -155,6 +189,12 @@ async function onAdoptConfirm({ name, category }: { name: string; category?: str
       scheduleExpr: adoptTarget.value.native.scheduleExpr,
       command: adoptTarget.value.native.command,
       category,
+      // The scheduler's own identity for this task, taken from the row — never from `name` above,
+      // which is the label the user just typed. The two share a word and mean different things.
+      native:
+        adoptTarget.value.native.name && adoptTarget.value.native.nativePath !== undefined
+          ? { name: adoptTarget.value.native.name, path: adoptTarget.value.native.nativePath }
+          : undefined,
     }])
     if (!r.ok || r.adopted.length === 0) {
       adoptError.value = `Adopt failed: ${r.error ?? r.reason ?? 'unknown error'}`

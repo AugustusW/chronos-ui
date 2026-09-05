@@ -26,6 +26,10 @@ const chipLabel = (): string => (chipKind() === 'wrapped' ? 'wrapped' : chipKind
         <ScheduleChip :kind="chipKind()" :label="chipLabel()" />
       </div>
       <div class="cmd">{{ item.job?.command ?? item.native?.command }}</div>
+      <!-- Which folder the task lives in. Two tasks can share a name in different folders, and
+           picking the wrong one to adopt is not something the user can see afterwards. Only where
+           the scheduler has folders at all. -->
+      <div v-if="item.native?.nativePath" class="native-path">{{ item.native.nativePath }}</div>
     </div>
     <div class="sched">
       <div class="h">{{ cronToHuman(item.job?.scheduleExpr ?? item.native?.scheduleExpr ?? '') }}</div>
@@ -45,6 +49,7 @@ const chipLabel = (): string => (chipKind() === 'wrapped' ? 'wrapped' : chipKind
 .row{display:flex;align-items:center;gap:11px;padding:9px var(--p-space-3);background:var(--color-surface);border:1px solid var(--color-border);border-radius:var(--p-radius);margin-bottom:7px}
 .row.sel{outline:2px solid var(--color-primary);outline-offset:-1px}
 .meta{min-width:0;flex:1;cursor:pointer}.meta:focus-visible{outline:2px solid var(--color-primary);outline-offset:2px;border-radius:var(--p-radius)}.name{font-weight:600;display:flex;gap:8px;align-items:center;font-size:13px}
+.native-path{font-size:11px;color:var(--color-text-muted);font-family:var(--p-font-mono)}
 .cmd{font-family:var(--p-font-mono);font-size:11px;color:var(--color-text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px}
 .sched{flex:0 0 150px}.sched .raw{font-family:var(--p-font-mono);font-size:10.5px;color:var(--color-text-muted)}
 .last{flex:0 0 130px;font-size:11.5px;color:var(--color-text-muted);font-variant-numeric:tabular-nums}

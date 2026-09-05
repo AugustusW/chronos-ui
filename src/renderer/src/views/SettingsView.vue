@@ -108,7 +108,16 @@ async function confirmTeardown(deleteData: boolean): Promise<void> {
     // main process deliberately stays alive — this is the only surface that can report it.
     const notes: string[] = []
     if (r.skipped.length) {
-      notes.push(`${r.skipped.length} job(s) were already gone from the scheduler and were left alone.`)
+      // Two different situations, and the difference decides what the user has to do next. Calling
+      // an ambiguous marker "already gone" would send them looking for a task that is still there.
+      const gone = r.skipped.filter((s) => s.reason !== 'ambiguous').length
+      const dup = r.skipped.length - gone
+      if (gone) notes.push(`${gone} job(s) were already gone from the scheduler and were left alone.`)
+      if (dup) {
+        notes.push(
+          `${dup} job(s) are claimed by two scheduled tasks each, so neither was touched. Remove the duplicate copy in Task Scheduler, then run this again.`
+        )
+      }
     }
     if (r.deleteFailed.length) {
       notes.push(`Could not delete: ${r.deleteFailed.join(', ')}. Remove them by hand after quitting.`)
