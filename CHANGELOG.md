@@ -6,6 +6,41 @@ All notable changes to ChronosUI are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-09-05
+
+Adopting an existing scheduled task now works on Windows. It never had.
+
+### Added
+- **Windows: adopt an existing scheduled task, in place.** The task keeps its own name and folder;
+  only its action and description change. Previously ChronosUI looked for a task named
+  `chronos-<id>` inside its own folder, which no task worth adopting ever is, so adopting always
+  failed with `no job N`. The job list now also shows which folder a task lives in.
+- **Windows: un-adopt restores the task exactly as it was.** The original program, its arguments
+  and its description are recorded when the task is adopted, and put back verbatim when it is
+  given up. The old behaviour rebuilt the action as `cmd.exe /c <command>`, which changes how `&`,
+  `|` and `>` are handled and how the exit code comes back. Teardown restores the same way.
+- **Windows: a task that was renamed outside ChronosUI is found again** by the marker in its
+  description, so teardown reverts it instead of skipping it as missing. Before this, teardown
+  reported success and left the task pointing at a `schedmgr.exe` about to be deleted, and every
+  trigger after that failed in silence.
+
+### Fixed
+- **Windows: a task whose name or folder contains an apostrophe could not be managed at all.**
+  The name went into the generated PowerShell unescaped, so `Dave's Backup` ended the string
+  early and every write failed with a parser error.
+- **Windows: two tasks carrying the same marker no longer stop everything else.** Duplicating a
+  task through Export/Import in Task Scheduler duplicates its description too. Writes to that one
+  job are refused by name, and both tasks are named in the message; teardown skips it and releases
+  the rest, where before it aborted for every job on the machine.
+- **Windows: a job that was just adopted or created is no longer refused as changed** on the next
+  write. Its baseline was recorded before it had a location to read from, so nothing was read.
+- **Batch Enable, Disable and Delete now say what went wrong.** Every result was discarded, and
+  Enable and Disable exist only there, so a refusal and a write that went through looked the same.
+- **A refusal now says what is actually missing.** `no job N` reads as "ChronosUI has no such job";
+  what it meant was that no scheduled task carries that job's marker any more.
+- Editing an adopted job's schedule no longer discards what un-adopt needs to restore it.
+- `npm run stage:schedmgr` now also puts the binary where an unpackaged run reads it.
+
 ## [0.5.1] — 2026-09-05
 
 Windows fixes, plus one that turned out to affect every platform.
@@ -140,7 +175,13 @@ Windows fixes, plus one that turned out to affect every platform.
 - Initial public release: read your native scheduler (crontab on macOS/Linux, Task Scheduler on
   Windows) in a GUI, adopt jobs to record output, run-now with live output.
 
-[Unreleased]: https://github.com/AugustusW/chronos-ui/compare/v0.1.5...HEAD
+[Unreleased]: https://github.com/AugustusW/chronos-ui/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/AugustusW/chronos-ui/compare/v0.5.1...v0.6.0
+[0.5.1]: https://github.com/AugustusW/chronos-ui/compare/v0.5.0...v0.5.1
+[0.5.0]: https://github.com/AugustusW/chronos-ui/compare/v0.4.0...v0.5.0
+[0.4.0]: https://github.com/AugustusW/chronos-ui/compare/v0.3.0...v0.4.0
+[0.3.0]: https://github.com/AugustusW/chronos-ui/compare/v0.2.0...v0.3.0
+[0.2.0]: https://github.com/AugustusW/chronos-ui/compare/v0.1.5...v0.2.0
 [0.1.5]: https://github.com/AugustusW/chronos-ui/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/AugustusW/chronos-ui/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/AugustusW/chronos-ui/compare/v0.1.2...v0.1.3

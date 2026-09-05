@@ -38,7 +38,7 @@ export interface TeardownResult {
   ok: boolean
   error?: string
   released: number[]
-  skipped: { chronosId: number; reason: 'no_match' }[]
+  skipped: { chronosId: number; reason: 'no_match' | 'ambiguous' }[]
   deleteFailed: string[]
 }
 
@@ -168,7 +168,12 @@ export function createJobsService(deps: JobsServiceDeps): JobsService {
           })
         )
       }
-      const specs: AdoptionSpec[] = inserted.map((j, i) => ({ chronosId: j.id, scheduleExpr: items[i].scheduleExpr, command: items[i].command }))
+      const specs: AdoptionSpec[] = inserted.map((j, i) => ({
+        chronosId: j.id,
+        scheduleExpr: items[i].scheduleExpr,
+        command: items[i].command,
+        native: items[i].native
+      }))
       const r = await adapter.adoptMany(specs)
       const kept = new Set(r.adopted)
       for (const j of inserted) {

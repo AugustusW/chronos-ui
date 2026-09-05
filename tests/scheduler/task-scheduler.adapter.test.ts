@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, it, expect } from 'vitest'
-import { TaskSchedulerAdapter, makePowerShellExec, PS_MAX_ENCODED_LEN } from '../../src/main/scheduler/task-scheduler.adapter'
+import { TaskSchedulerAdapter, makePowerShellExec, PS_MAX_ENCODED_LEN, MARKER_SCAN_TAG } from '../../src/main/scheduler/task-scheduler.adapter'
 import type { ExecFn } from '../../src/main/scheduler/types'
 
 const SCHEDMGR = 'C:\\Program Files\\ChronosUI\\schedmgr.exe'
@@ -38,6 +38,33 @@ function makeFakePwsh(opts: { listJson?: string; readJson?: (script: string) => 
     return { stdout: '', exitCode: 0 } // mutating scripts
   }
   return { exec, scripts }
+}
+
+/**
+ * Answer the marker scan with tasks ChronosUI created itself.
+ *
+ * These tests exercise ids the adapter has never list()ed. Before the location cache the adapter
+ * simply assumed `chronos-<id>` in its own folder; now it asks where the task is. For a task
+ * ChronosUI created that answer IS `chronos-<id>` in its own folder — so the assertions below are
+ * unchanged, but they now mean "it used the name the task actually has" rather than "it used the
+ * name we can derive".
+ */
+function withMarkerScan(inner: ExecFn, ids: number[]): ExecFn {
+  return async (cmd, args, stdin) => {
+    if (decodeScript(args).includes(MARKER_SCAN_TAG)) {
+      return {
+        stdout: JSON.stringify(
+          ids.map((id) => ({
+            TaskName: `chronos-${id}`,
+            TaskPath: FOLDER,
+            Description: `ChronosUI managed job\nchronos:${id}\nsched:daily 03:00`
+          }))
+        ),
+        exitCode: 0
+      }
+    }
+    return inner(cmd, args, stdin)
+  }
 }
 
 function adapter(exec: ExecFn) {
@@ -239,7 +266,7 @@ describe('TaskSchedulerAdapter adopt/unadopt', () => {
 
   it('adopt writes schedmgr.exe action with the EXACT quoting chain (winQuote fields + psQuote whole)', async () => {
     const { exec, setScripts } = fakeFor({ adopted: false })
-    const a = adapter(exec)
+    const a = adapter(withMarkerScan(exec, [42]))
     const res = await a.adopt(42, { scheduleExpr: 'daily 03:00', command: 'backup.bat && notify.bat', schedmgrPath: SCHEDMGR, dbPath: DB })
     expect(res.ok).toBe(true)
     const set = setScripts.find((s) => /Set-ScheduledTask/.test(s))!
@@ -251,7 +278,7 @@ describe('TaskSchedulerAdapter adopt/unadopt', () => {
 
   it('refuses to adopt an elevated (HighestAvailable) task', async () => {
     const { exec } = fakeFor({ adopted: false, runLevel: 'Highest' })
-    const a = adapter(exec)
+    const a = adapter(withMarkerScan(exec, [42]))
     const res = await a.adopt(42, { scheduleExpr: 'daily 03:00', command: 'backup.bat', schedmgrPath: SCHEDMGR, dbPath: DB })
     expect(res.ok).toBe(false)
     expect(res.error).toMatch(/elevated|Highest/i)
@@ -277,7 +304,7 @@ describe('TaskSchedulerAdapter adopt/unadopt', () => {
 
   it('unadopt restores the bare cmd.exe /c action', async () => {
     const { exec, setScripts } = fakeFor({ adopted: true })
-    const a = adapter(exec)
+    const a = adapter(withMarkerScan(exec, [42]))
     const res = await a.unadopt(42, 'backup.bat && notify.bat')
     expect(res.ok).toBe(true)
     const set = setScripts.find((s) => /Set-ScheduledTask/.test(s))!
@@ -287,7 +314,7 @@ describe('TaskSchedulerAdapter adopt/unadopt', () => {
 
   it('adoptMany adopts sequentially and reports the ids that succeeded', async () => {
     const { exec } = fakeFor({ adopted: false })
-    const a = adapter(exec)
+    const a = adapter(withMarkerScan(exec, [42]))
     const r = await a.adoptMany([{ chronosId: 42, scheduleExpr: 'daily 03:00', command: 'backup.bat && notify.bat' }])
     expect(r.ok).toBe(true)
     expect(r.adopted).toEqual([42])
@@ -295,10 +322,14 @@ describe('TaskSchedulerAdapter adopt/unadopt', () => {
 
   it('adoptMany stops at the first failure and reports the prefix that succeeded', async () => {
     const { exec } = fakeFor({ adopted: false, runLevel: 'Highest' }) // elevated → adopt refuses
-    const a = adapter(exec)
+    // The marker scan matters here: without it adopt now fails at the location lookup instead,
+    // and this test would still be green while verifying nothing about elevated tasks.
+    const a = adapter(withMarkerScan(exec, [42]))
     const r = await a.adoptMany([{ chronosId: 42, scheduleExpr: 'daily 03:00', command: 'backup.bat' }])
     expect(r.ok).toBe(false)
     expect(r.adopted).toEqual([])
+    // Name the reason, so a failure for any other reason cannot stand in for this one.
+    expect(r.error).toMatch(/elevated/)
   })
 })
 
@@ -347,7 +378,7 @@ describe('TaskSchedulerAdapter CRUD', () => {
       if (/Set-ScheduledTask/.test(s)) { setScripts.push(s); return { stdout: '', exitCode: 0 } }
       return { stdout: '', exitCode: 0 }
     }
-    const a = adapter(exec)
+    const a = adapter(withMarkerScan(exec, [5]))
     const res = await a.updateJob(5, { scheduleExpr: 'weekly MON 09:00' })
     expect(res.ok).toBe(true)
     expect(setScripts[0]).toContain("New-ScheduledTaskTrigger -Weekly -DaysOfWeek Monday -At '09:00'")
@@ -363,7 +394,7 @@ describe('TaskSchedulerAdapter CRUD', () => {
       }
       return { stdout: '', exitCode: 0 }
     }
-    const a = adapter(exec)
+    const a = adapter(withMarkerScan(exec, [5]))
     const res = await a.updateJob(5, { command: 'evil.bat' })
     expect(res.ok).toBe(false)
     expect(res.error).toMatch(/adopted/i)
@@ -381,7 +412,7 @@ describe('TaskSchedulerAdapter CRUD', () => {
       if (/Set-ScheduledTask/.test(s)) { setScripts.push(s); return { stdout: '', exitCode: 0 } }
       return { stdout: '', exitCode: 0 }
     }
-    const a = adapter(exec)
+    const a = adapter(withMarkerScan(exec, [5]))
     const res = await a.updateJob(5, { scheduleExpr: 'daily 99:99' })
     expect(res.ok).toBe(false)
     expect(res.error).toMatch(/bad time/i)
@@ -428,7 +459,7 @@ describe('TaskSchedulerAdapter CRUD', () => {
       if (/Unregister-ScheduledTask/.test(s)) { unregScripts.push(s); return { stdout: '', exitCode: 0 } }
       return { stdout: '', exitCode: 0 }
     }
-    const a = adapter(exec) // no list() — snapshots map is empty
+    const a = adapter(withMarkerScan(exec, [99])) // no list() — snapshots map is empty
     const res = await a.deleteJob(99)
     expect(res.ok).toBe(true)
     expect(unregScripts.length).toBeGreaterThan(0) // Unregister-ScheduledTask WAS called
@@ -437,7 +468,7 @@ describe('TaskSchedulerAdapter CRUD', () => {
   it('deleteJob unregisters the task', async () => {
     const scripts: string[] = []
     const exec: ExecFn = async (_c, a) => { scripts.push(decodeScript(a)); return { stdout: '', exitCode: 0 } }
-    const a = adapter(exec)
+    const a = adapter(withMarkerScan(exec, [5]))
     const res = await a.deleteJob(5)
     expect(res.ok).toBe(true)
     expect(scripts.find((s) => /Unregister-ScheduledTask/.test(s))!).toContain("-TaskName 'chronos-5'")
@@ -484,7 +515,7 @@ describe('TaskSchedulerAdapter releaseAll (teardown)', () => {
 
   it('restores an adopted task to its original action and clears the marker', async () => {
     const { exec, setScripts } = fakeTasks()
-    const a = adapter(exec)
+    const a = adapter(withMarkerScan(exec, [42]))
     const r = await a.releaseAll([{ chronosId: 42, originalCommand: 'backup.bat' }])
     expect(r.ok).toBe(true)
     expect(r.released).toEqual([42])
@@ -497,7 +528,7 @@ describe('TaskSchedulerAdapter releaseAll (teardown)', () => {
 
   it('leaves a created task action alone and only clears its marker', async () => {
     const { exec, setScripts } = fakeTasks()
-    const a = adapter(exec)
+    const a = adapter(withMarkerScan(exec, [7]))
     const r = await a.releaseAll([{ chronosId: 7, originalCommand: 'created.bat' }])
     expect(r.ok).toBe(true)
     expect(r.released).toEqual([7])
@@ -508,7 +539,7 @@ describe('TaskSchedulerAdapter releaseAll (teardown)', () => {
 
   it('reports an unregistered task as skipped and keeps going (no batch abort)', async () => {
     const { exec } = fakeTasks()
-    const a = adapter(exec)
+    const a = adapter(withMarkerScan(exec, [42]))  // 42 exists, 99 does not — that is the point
     const r = await a.releaseAll([
       { chronosId: 99, originalCommand: 'gone.bat' },
       { chronosId: 42, originalCommand: 'backup.bat' }

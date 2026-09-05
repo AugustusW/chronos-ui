@@ -8,6 +8,13 @@ export type ExecFn = (
 ) => Promise<{ stdout: string; exitCode: number }>
 
 /** A job as seen in the native scheduler (returned by list()). */
+/** The scheduler's own identity for a task, where it has one. A Windows Task Scheduler task is
+ *  identified by its name AND its folder; crontab has neither and leaves this undefined. */
+export interface NativeTaskRef {
+  name: string
+  path: string
+}
+
 export interface ParsedJob {
   chronosId: number | null // null = unmanaged (pre-existing) line/task shown read-only until adopted
   scheduleExpr: string
@@ -18,6 +25,10 @@ export interface ParsedJob {
   canAdopt?: boolean // architect D4: Windows — false for ≠1-action / non-exec / elevated external tasks; undefined ⇒ adoptable (crontab)
   scheduleLossy?: boolean // architect D3: scheduleExpr is a best-effort read-back of an unsupported trigger (display-only)
   name?: string // #8: native name where the scheduler has one (Windows Task Scheduler TaskName). crontab has none → undefined.
+  /** The folder the task lives in (Windows TaskPath). Fetched by the list script and previously
+   *  dropped — without it two same-named tasks in different folders are indistinguishable, and the
+   *  caller cannot tell the adapter which one the user picked. undefined on crontab. */
+  nativePath?: string
 }
 
 export interface DriftResult {
@@ -49,6 +60,10 @@ export interface AdoptionSpec {
   chronosId: number
   scheduleExpr: string
   command: string // the original command to wrap
+  /** Which existing task to adopt — see AdoptOptions.native. adoptMany must copy this through:
+   *  it rebuilds an AdoptOptions literal rather than passing the spec, so a field added here and
+   *  not there never reaches the implementation. */
+  native?: NativeTaskRef
 }
 
 /** Result of adoptMany. `adopted` = chronosIds the adapter actually wrapped (crontab: all-or-nothing; Windows: the prefix that succeeded). */
@@ -79,12 +94,21 @@ export interface ReleaseResult {
   error?: string
   errorCode?: KnownErrorCode
   released: number[]
-  skipped: { chronosId: number; reason: 'no_match' }[]
+  /** `no_match`: the scheduler no longer knows about that job. `ambiguous`: two tasks carry its
+   *  marker, so un-marking either one would be a guess. Both are left alone; the difference is
+   *  what the user has to do about it. */
+  skipped: { chronosId: number; reason: 'no_match' | 'ambiguous' }[]
 }
 
 export interface AdoptOptions {
   scheduleExpr: string
   command: string // the original command to wrap
+  /** Which existing task to adopt. Optional because crontab finds its target by matching schedule
+   *  and command; Windows needs the identity because the task keeps its own name and folder.
+   *  Only consulted when the adapter has no cached location for this chronosId — the two existing
+   *  re-adopt paths (backend-switch rebakeDescriptors, the compensating re-adopt in jobs.service)
+   *  pass none, and must keep working. */
+  native?: NativeTaskRef
   schedmgrPath: string // absolute path to the schedmgr binary (Plan 7 resolves; injected here)
   dbPath: string // absolute path to the chronos SQLite db (Plan 5 resolves; injected here)
 }
