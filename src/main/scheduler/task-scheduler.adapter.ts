@@ -4,7 +4,7 @@ import { spawn } from 'node:child_process'
 import { winQuoteArg, winUnquoteArg, psQuote } from './win-quote'
 import { parseTriggerDescriptor, triggerSpecToDescriptor, triggerSpecToPwsh, cimTriggerToDescriptor } from './trigger-model'
 import { buildDescription, parseDescription } from './task-marker'
-import type { AdoptOptions, AdoptionSpec, BatchWriteResult, DriftResult, ExecFn, ParsedJob, SchedulerAdapter, WriteResult } from './types'
+import type { AdoptOptions, AdoptionSpec, BatchWriteResult, DriftResult, ExecFn, ParsedJob, ReleaseResult, ReleaseSpec, SchedulerAdapter, WriteResult } from './types'
 
 // Windows floor: Windows 10 1709+ / PowerShell 5.1+ (the ScheduledTasks module).
 // We drive the cmdlets (Get/New/Set/Register/Unregister/Enable/Disable-ScheduledTask),
@@ -297,6 +297,51 @@ Set-ScheduledTask -InputObject $t | Out-Null
       adopted.push(spec.chronosId)
     }
     return { ok: true, adopted }
+  }
+
+  // teardown: release every listed task. Per-task, mirroring adoptMany's accepted non-atomic shape on
+  // this platform (types.ts documents the crontab/Windows split). Unlike adoptMany, a task that is no
+  // longer registered goes to `skipped` and the loop continues — teardown is the user's exit path and
+  // must not be blocked by one externally removed task (spec §2).
+  //
+  // NOTE: this deliberately does NOT call guard(). A task whose XML drifted since we snapshotted it is
+  // still a task we must un-mark; refusing would leave a schedmgr-wrapped action pointing at a binary
+  // the user is about to delete, which is strictly worse than overwriting an external edit.
+  async releaseAll(specs: ReleaseSpec[]): Promise<ReleaseResult> {
+    const released: number[] = []
+    const skipped: { chronosId: number; reason: 'no_match' }[] = []
+
+    for (const spec of specs) {
+      const cur = await this.readOne(spec.chronosId)
+      if (!cur) {
+        skipped.push({ chronosId: spec.chronosId, reason: 'no_match' })
+        continue
+      }
+      const name = this.taskName(spec.chronosId)
+      // An adopted task also needs its action restored; a created one keeps the action it has.
+      const restoreAction = cur.adopted
+        ? `$t.Actions = @(New-ScheduledTaskAction -Execute 'cmd.exe' -Argument ${psQuote('/c ' + spec.originalCommand)})\n`
+        : ''
+      const script = `
+$t = Get-ScheduledTask -TaskName '${name}' -TaskPath '${this.folder}'
+${restoreAction}$t.Description = ''
+Set-ScheduledTask -InputObject $t | Out-Null
+`.trim()
+      const { exitCode, stdout } = await this.ps(script)
+      if (exitCode !== 0) {
+        return {
+          ok: false,
+          reason: 'error',
+          error: `releaseAll failed on ${spec.chronosId} (${exitCode}): ${stdout}`.trim(),
+          released,
+          skipped
+        }
+      }
+      this.snapshots.delete(spec.chronosId)
+      released.push(spec.chronosId)
+    }
+
+    return { ok: true, released, skipped }
   }
 
   async unadopt(chronosId: number, originalCommand: string): Promise<WriteResult> {

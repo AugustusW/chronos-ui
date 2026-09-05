@@ -266,3 +266,121 @@ describe('CrontabAdapter.adoptMany', () => {
     expect(writes).toHaveLength(0)
   })
 })
+
+describe('CrontabAdapter.releaseAll (teardown)', () => {
+  it('unwraps adopted jobs, strips markers from created jobs, in ONE write', async () => {
+    const initial = [
+      '# chronos:1',
+      `*/5 * * * * ${SCHEDMGR} run 1 --db ${DB} -- 'backup.sh'`,
+      '0 9 * * * unmanaged.sh',
+      '# chronos:2',
+      '30 2 * * * created.sh',
+      ''
+    ].join('\n')
+    const { exec, state } = makeFakeExec(initial)
+    const a = new CrontabAdapter({ exec, schedmgrPath: SCHEDMGR, dbPath: DB })
+
+    const r = await a.releaseAll([
+      { chronosId: 1, originalCommand: 'backup.sh' },
+      { chronosId: 2, originalCommand: 'created.sh' }
+    ])
+
+    expect(r.ok).toBe(true)
+    expect(r.released).toEqual([1, 2])
+    expect(r.skipped).toEqual([])
+    expect(state.writes).toHaveLength(1) // 單次 crontab -，不是每筆一次
+    expect(state.writes[0]).toBe(
+      ['*/5 * * * * backup.sh', '0 9 * * * unmanaged.sh', '30 2 * * * created.sh', ''].join('\n')
+    )
+  })
+
+  it('keeps a disabled job disabled', async () => {
+    const initial = ['# chronos:1', `#*/5 * * * * ${SCHEDMGR} run 1 --db ${DB} -- 'backup.sh'`, ''].join('\n')
+    const { exec, state } = makeFakeExec(initial)
+    const a = new CrontabAdapter({ exec, schedmgrPath: SCHEDMGR, dbPath: DB })
+    const r = await a.releaseAll([{ chronosId: 1, originalCommand: 'backup.sh' }])
+    expect(r.ok).toBe(true)
+    expect(state.writes[0]).toBe(['#*/5 * * * * backup.sh', ''].join('\n'))
+  })
+
+  it('skips ids absent from crontab instead of aborting the batch', async () => {
+    const initial = ['# chronos:1', '30 2 * * * created.sh', ''].join('\n')
+    const { exec, state } = makeFakeExec(initial)
+    const a = new CrontabAdapter({ exec, schedmgrPath: SCHEDMGR, dbPath: DB })
+    const r = await a.releaseAll([
+      { chronosId: 1, originalCommand: 'created.sh' },
+      { chronosId: 99, originalCommand: 'gone.sh' }
+    ])
+    expect(r.ok).toBe(true)
+    expect(r.released).toEqual([1])
+    expect(r.skipped).toEqual([{ chronosId: 99, reason: 'no_match' }])
+    expect(state.writes[0]).toBe(['30 2 * * * created.sh', ''].join('\n'))
+  })
+
+  it('is a no-op with an empty list (no crontab write at all)', async () => {
+    const { exec, state } = makeFakeExec('# chronos:1\n30 2 * * * a.sh\n')
+    const a = new CrontabAdapter({ exec, schedmgrPath: SCHEDMGR, dbPath: DB })
+    const r = await a.releaseAll([])
+    expect(r.ok).toBe(true)
+    expect(state.writes).toHaveLength(0)
+  })
+
+  it('keeps every line index correct when rewrites and marker deletions interleave', async () => {
+    // 三筆交錯：adopted / created / adopted，中間夾未管理行。M2 守的就是這個。
+    const initial = [
+      '# chronos:1',
+      `0 1 * * * ${SCHEDMGR} run 1 --db ${DB} -- 'one.sh'`,
+      '0 2 * * * unmanaged-a.sh',
+      '# chronos:2',
+      '0 3 * * * two.sh',
+      '0 4 * * * unmanaged-b.sh',
+      '# chronos:3',
+      `0 5 * * * ${SCHEDMGR} run 3 --db ${DB} -- 'three.sh'`,
+      ''
+    ].join('\n')
+    const { exec, state } = makeFakeExec(initial)
+    const a = new CrontabAdapter({ exec, schedmgrPath: SCHEDMGR, dbPath: DB })
+    const r = await a.releaseAll([
+      { chronosId: 1, originalCommand: 'one.sh' },
+      { chronosId: 2, originalCommand: 'two.sh' },
+      { chronosId: 3, originalCommand: 'three.sh' }
+    ])
+    expect(r.ok).toBe(true)
+    expect(state.writes[0]).toBe(
+      [
+        '0 1 * * * one.sh',
+        '0 2 * * * unmanaged-a.sh',
+        '0 3 * * * two.sh',
+        '0 4 * * * unmanaged-b.sh',
+        '0 5 * * * three.sh',
+        ''
+      ].join('\n')
+    )
+  })
+})
+
+describe('CrontabAdapter.releaseAll guards', () => {
+  it('rejects a batch containing the same chronosId twice (mirrors adoptMany)', async () => {
+    const { exec, state } = makeFakeExec('# chronos:1\n30 2 * * * a.sh\n')
+    const a = new CrontabAdapter({ exec, schedmgrPath: SCHEDMGR, dbPath: DB })
+    const r = await a.releaseAll([
+      { chronosId: 1, originalCommand: 'a.sh' },
+      { chronosId: 1, originalCommand: 'a.sh' }
+    ])
+    expect(r.ok).toBe(false)
+    expect(r.errorCode).toBe('invalid_input')
+    expect(state.writes).toHaveLength(0) // 拒絕就不能留下半套
+  })
+
+  it('writes nothing when the crontab drifted under us', async () => {
+    const initial = ['# chronos:1', '30 2 * * * a.sh', ''].join('\n')
+    const { exec, state } = makeFakeExec(initial)
+    const a = new CrontabAdapter({ exec, schedmgrPath: SCHEDMGR, dbPath: DB })
+    await a.list() // 取快照
+    state.text = '# chronos:1\n30 2 * * * a.sh\n0 9 * * * someone-else-added-this.sh\n'
+    const r = await a.releaseAll([{ chronosId: 1, originalCommand: 'a.sh' }])
+    expect(r.ok).toBe(false)
+    expect(r.reason).toBe('drift')
+    expect(state.writes).toHaveLength(0)
+  })
+})

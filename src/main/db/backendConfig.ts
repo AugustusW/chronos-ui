@@ -13,7 +13,8 @@ export interface ConfigApp {
   getPath(name: 'userData'): string
 }
 
-function configPath(app: ConfigApp): string {
+/** Exported so teardown can delete this file without re-typing the literal name (plan-advisor L1). */
+export function configPath(app: ConfigApp): string {
   return join(app.getPath('userData'), 'chronos-config.json')
 }
 

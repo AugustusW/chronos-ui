@@ -2,12 +2,14 @@
 import { describe, it, expect, vi } from 'vitest'
 import { buildMainDeps, BootPgUnreachableError, handleBootPgUnreachable, BOOT_PG_UNREACHABLE_BUTTONS, type BuiltDeps } from '../src/main/bootstrap'
 import { openAndMigrate as openSqliteForTest } from '../src/main/db/lifecycle'
+import { createSqliteNotifySettingsRepo } from '../src/main/db/notifySettings.repository'
+import { LAUNCHD_FLUSH_LABEL } from '../src/main/services/notify-flush-launchd'
 import { readBackendConfig } from '../src/main/db/backendConfig'
 import type { DatabaseHandle } from '../src/main/db/client'
 import type { PgSecretDeps } from '../src/main/services/pg-secret'
 import type { ExecFn } from '../src/main/scheduler'
 import { fileURLToPath } from 'node:url'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { EventEmitter } from 'node:events'
@@ -390,5 +392,64 @@ describe('handleBootPgUnreachable (T12)', () => {
     expect(result).toBeNull()
     expect(quit).toHaveBeenCalledOnce()
     expect(buildSqliteFallback).not.toHaveBeenCalled()
+  })
+})
+
+describe('boot-time notify-flush agent refresh (macOS)', () => {
+  // Shape written by 0.2.0: schedmgr invoked directly, no /bin/sh wrapper. install() only ever runs
+  // on a settings save, so without a boot-time refresh this file outlives every upgrade — and the
+  // self-clean added for teardown never reaches the installs it exists to protect.
+  const LEGACY = `<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>${LAUNCHD_FLUSH_LABEL}</string>
+  <key>ProgramArguments</key>
+  <array><string>/opt/schedmgr</string><string>notify-flush</string></array>
+  <key>StartInterval</key><integer>600</integer>
+</dict>
+</plist>
+`
+
+  async function seed(notifyEnabled: boolean) {
+    const dir = mkdtempSync(join(tmpdir(), 'chronos-launchagents-'))
+    const dbFile = join(dir, 'chronos.db')
+    const h = await openSqliteForTest(
+      { dialect: 'sqlite', path: dbFile },
+      { sqlite: join(APP_ROOT, 'src/main/db/migrations'), pg: join(APP_ROOT, 'src/main/db/migrations.pg') }
+    )
+    await createSqliteNotifySettingsRepo(h.db).save({
+      enabled: notifyEnabled, chatId: '1', windowMin: 10, includeStderr: false, nativeEnabled: true
+    })
+    await h.close()
+
+    const laDir = join(dir, 'LaunchAgents')
+    mkdirSync(laDir)
+    const plist = join(laDir, `${LAUNCHD_FLUSH_LABEL}.plist`)
+    writeFileSync(plist, LEGACY)
+    return { dir, dbFile, laDir, plist }
+  }
+
+  it('rewrites an agent left behind by an older build', async () => {
+    const s = await seed(true)
+    const built = await buildMainDeps(fakeApp, {
+      exec, platform: 'darwin', appRoot: APP_ROOT, resourcesPath: '/x',
+      dbPath: s.dbFile, launchAgentsDir: s.laDir
+    })
+    // The unit tests prove refreshIfStale is correct; this proves boot actually calls it. Deleting
+    // the bootstrap call leaves those unit tests green and the bug fully restored.
+    expect(readFileSync(s.plist, 'utf8')).toContain('<string>/bin/sh</string>')
+    await built.handle.close()
+    rmSync(s.dir, { recursive: true, force: true })
+  })
+
+  it('leaves it alone when notifications are off — refreshing would revive a disabled entry', async () => {
+    const s = await seed(false)
+    const built = await buildMainDeps(fakeApp, {
+      exec, platform: 'darwin', appRoot: APP_ROOT, resourcesPath: '/x',
+      dbPath: s.dbFile, launchAgentsDir: s.laDir
+    })
+    expect(readFileSync(s.plist, 'utf8')).toBe(LEGACY)
+    await built.handle.close()
+    rmSync(s.dir, { recursive: true, force: true })
   })
 })

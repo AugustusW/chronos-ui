@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { Job, RunLog } from '../main/db/schema'
 import type { ParsedJob, BatchWriteResult, WriteResult } from '../main/scheduler/types'
+import type { TeardownResult } from '../main/services/jobs.service'
 import type { PgDsnParts } from '../main/services/pg-dsn'
 import type { TestConnectionResult } from '../main/services/backend-switch'
 
@@ -26,6 +27,7 @@ export const IPC = {
   notifySave: 'notify:save',
   notifyTest: 'notify:test',
   jobsManagedCount: 'jobs:managedCount',
+  appTeardown: 'app:teardown',
   pgTestConnection: 'pg:testConnection',
   pgSaveSwitch: 'pg:saveSwitch',
   pgGetStatus: 'pg:getStatus',
@@ -181,7 +183,7 @@ export type ExportYamlResult = { status: 'ok'; path: string } | { status: 'cance
 export type ImportPreviewResult = { status: 'ok'; preview: ImportPreview } | { status: 'canceled' } | { status: 'error'; error: string }
 export type ImportApplyResult = { ok: boolean; created: number; updated: number; errors: string[] }
 
-export type { Job, RunLog, ParsedJob, BatchWriteResult, WriteResult }
+export type { Job, RunLog, ParsedJob, BatchWriteResult, WriteResult, TeardownResult }
 export type { NotifySettingsDTO, NotifySaveInput, SaveResult } from '../main/services/notify.service'
 export type { PgDsnParts, TestConnectionResult }
 export type { DashboardSummary, UpcomingRow } from '../main/services/dashboard.service'

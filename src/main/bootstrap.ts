@@ -6,7 +6,7 @@ import { join, dirname } from 'node:path'
 import type { DatabaseHandle } from './db/client'
 import { openAndMigrate, drainPgHandle } from './db/lifecycle'
 import { createRepositories, type RunOutcomeRow, type RunSearchFilters, type RunLogWithJob } from './db/repositories'
-import { readBackendConfig } from './db/backendConfig'
+import { readBackendConfig, configPath } from './db/backendConfig'
 import { schedmgrDbDescriptor } from './scheduler/descriptor'
 import { resolveDbPath, resolveMigrationsPaths, type AppPaths } from './db/paths'
 import { createAdapter } from './scheduler/factory'
@@ -29,7 +29,8 @@ import type { IpcDeps } from './ipc'
 import type { RunEvent, PgStatus, RunDurationTrendPoint } from '../shared/ipc-contract'
 import { JOB_TREND_LIMIT } from '../shared/dashboard-limits'
 
-type App = AppPaths & { getName(): string; getVersion(): string; getAppPath(): string }
+// `quit` is optional so the structural fakes tests pass in stay valid; Electron's real app has it.
+type App = AppPaths & { getName(): string; getVersion(): string; getAppPath(): string; quit?(): void }
 
 /** Thrown by buildMainDeps (T11) when the persisted backend config says 'postgres' but the DSN
  *  can't be resolved (missing pgService / no secret found) or the connection itself fails. NEVER
@@ -41,6 +42,18 @@ export class BootPgUnreachableError extends Error {
     super(message)
     this.name = 'BootPgUnreachableError'
   }
+}
+
+/** resourcesPath is <bundle>/Contents/Resources, so the bundle is two levels up. Returns null in dev
+ *  (no bundle → no self-clean). A packaged build with no resourcesPath would silently disable
+ *  self-clean, which is the same quiet degradation this feature exists to remove, so it says so. */
+function packagedBundlePath(isPackaged: boolean, resourcesPath: string): string | null {
+  if (!isPackaged) return null
+  if (!resourcesPath) {
+    console.warn('[teardown] packaged build with no resourcesPath — LaunchAgent self-clean disabled')
+    return null
+  }
+  return dirname(dirname(resourcesPath))
 }
 
 /** Same "the raw DSN might appear anywhere in a driver error, not just as a prefix" concern
@@ -77,6 +90,17 @@ export interface BuildOpts {
    *  supply them. */
   relaunchApp?: () => void
   exitApp?: () => void
+  /** Ends the app after a successful teardown. index.ts wires this to the shared quit guard
+   *  (`quit-guard.ts`), the same one the tray's Quit and the window-close interception use — a bare
+   *  `app.quit()` on win32/linux tears down the tray, timers and DB and then leaves the process
+   *  alive with no window, a zombie only Task Manager can kill (code review, Critical #1). macOS is
+   *  exempt from that interception, which is exactly why neither the test suite nor a Mac-only
+   *  manual check catches it. Defaults to a bare quit for non-Electron callers/tests. */
+  quitApp?: () => void
+  /** Test seam: where the macOS notify-flush LaunchAgent lives. Defaults to the real
+   *  ~/Library/LaunchAgents. Injected so a test can exercise the boot-time refresh without
+   *  reading — or rewriting — the developer's own agent. */
+  launchAgentsDir?: string
   /** v0.4.0: a second consumer of every RunEvent this boot's `emit` fans out — wired by index.ts
    *  to the tray's `applyRunEvent`, alongside the primary renderer webContents sink below. Mirrors
    *  the renderer's own composite fan-out (src/renderer/src/main.ts's startRunEventBridge callback
@@ -238,24 +262,6 @@ export async function buildMainDeps(app: App, opts: BuildOpts = {}): Promise<Bui
   const exec = opts.exec ?? (platform === 'win32' ? makePowerShellExec() : makeCrontabExec())
   const schedmgrPath = resolveSchedmgrPath({ isPackaged: app.isPackaged, platform, appRoot, resourcesPath })
   const adapter = createAdapter(platform, exec, { schedmgrPath, dbPath: schedmgrDescriptor })
-  const service = createJobsService({ repos, adapter, platform, schedmgrPath, dbPath: schedmgrDescriptor })
-
-  // v0.4.0: YAML import/export — reuses `service`'s create/update/enable/disable (the SAME path
-  // "New job" / the job editor already go through, native-scheduler-adapter included) rather than
-  // writing DB rows directly. Dialogs default to "always canceled" / fs defaults to real node:fs —
-  // see BuildOpts' doc comments for why each defaults the way it does.
-  const jobIo = createJobIoService({
-    listJobs: () => repos.jobs.list(),
-    createJob: (input) => service.create(input),
-    updateJob: (id, changes) => service.update(id, changes),
-    enableJob: (id) => service.enable(id),
-    disableJob: (id) => service.disable(id),
-    showSaveDialog: opts.showSaveDialog ?? (async () => ({ canceled: true })),
-    showOpenDialog: opts.showOpenDialog ?? (async () => ({ canceled: true, filePaths: [] })),
-    readFile: opts.readFile ?? ((p) => readFileSync(p, 'utf8')),
-    writeFile: opts.writeFile ?? ((p, c) => writeFileSync(p, c, 'utf8'))
-  })
-
   // notify-flush entry: macOS uses a per-user LaunchAgent (avoids the SysAdminFiles "administer this
   // computer" prompt that editing crontab triggers); linux/win delegate to the scheduler adapter.
   const flushScheduler: FlushScheduler =
@@ -263,8 +269,12 @@ export async function buildMainDeps(app: App, opts: BuildOpts = {}): Promise<Bui
       ? createLaunchdFlush({
           schedmgrPath,
           dbDescriptor: schedmgrDescriptor,
-          launchAgentsDir: join(homedir(), 'Library', 'LaunchAgents'),
+          launchAgentsDir: opts.launchAgentsDir ?? join(homedir(), 'Library', 'LaunchAgents'),
           uid: process.getuid?.() ?? 0,
+          // Self-clean only in a packaged build. resourcesPath is <bundle>/Contents/Resources, so the
+          // bundle is two levels up. In dev there is no bundle, so null disables the branch entirely.
+          appBundlePath: packagedBundlePath(app.isPackaged, resourcesPath),
+          missCounterPath: join(app.getPath('userData'), 'notify-flush-miss'),
           exec: (cmd, a) =>
             new Promise((resolve) => {
               // launchctl writes failures to stderr — fold it in so a non-zero exit has a useful message.
@@ -283,9 +293,74 @@ export async function buildMainDeps(app: App, opts: BuildOpts = {}): Promise<Bui
             } catch {
               /* best-effort: already gone */
             }
+          },
+          readFile: (p) => {
+            try {
+              return readFileSync(p, 'utf8')
+            } catch (err) {
+              if ((err as NodeJS.ErrnoException)?.code === 'ENOENT') return null
+              throw err
+            }
           }
         })
-      : { install: (n) => adapter.installFlushEntry(n), remove: () => adapter.removeFlushEntry() }
+      : {
+          install: (n) => adapter.installFlushEntry(n),
+          remove: () => adapter.removeFlushEntry(),
+          // linux/win keep the flush entry in the scheduler itself, and installFlushEntry already
+          // rewrites it wholesale; there is no separate stale-content problem to fix here.
+          refreshIfStale: async () => null
+        }
+
+  // An agent written by an older build is never touched again, because install() only runs when the
+  // user saves notification settings. Without this, the self-clean added for teardown reaches new
+  // installs only — and every upgrader keeps an agent that will outlive the app it points at.
+  // Best-effort by design: a failure here must not stop the app from starting.
+  try {
+    const ns = await repos.notifySettings.get()
+    if (ns.enabled && ns.windowMin >= 1) await flushScheduler.refreshIfStale(ns.windowMin)
+  } catch (err) {
+    console.warn('[bootstrap] notify-flush agent refresh skipped:', (err as Error).message)
+  }
+
+  const service = createJobsService({
+    repos,
+    adapter,
+    platform,
+    schedmgrPath,
+    dbPath: schedmgrDescriptor,
+    // teardown-only deps. sqliteDbPath is the real file; dbPath above is the schedmgr descriptor,
+    // which on a PostgreSQL backend is not a path at all.
+    sqliteDbPath: dbPath,
+    configPath: configPath(app),
+    // Deliberately NOT swallowing here: an ENOENT is fine, anything else (a Windows EBUSY because
+    // the SQLite file is still open, a permission error) has to reach the user rather than be
+    // reported as a successful cleanup.
+    rmFile: (fp) => {
+      try {
+        rmSync(fp)
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException)?.code !== 'ENOENT') throw err
+      }
+    },
+    flush: platform === 'darwin' ? flushScheduler : null,
+    quit: opts.quitApp ?? (() => app.quit?.())
+  })
+
+  // v0.4.0: YAML import/export — reuses `service`'s create/update/enable/disable (the SAME path
+  // "New job" / the job editor already go through, native-scheduler-adapter included) rather than
+  // writing DB rows directly. Dialogs default to "always canceled" / fs defaults to real node:fs —
+  // see BuildOpts' doc comments for why each defaults the way it does.
+  const jobIo = createJobIoService({
+    listJobs: () => repos.jobs.list(),
+    createJob: (input) => service.create(input),
+    updateJob: (id, changes) => service.update(id, changes),
+    enableJob: (id) => service.enable(id),
+    disableJob: (id) => service.disable(id),
+    showSaveDialog: opts.showSaveDialog ?? (async () => ({ canceled: true })),
+    showOpenDialog: opts.showOpenDialog ?? (async () => ({ canceled: true, filePaths: [] })),
+    readFile: opts.readFile ?? ((p) => readFileSync(p, 'utf8')),
+    writeFile: opts.writeFile ?? ((p, c) => writeFileSync(p, c, 'utf8'))
+  })
 
   const notify = createNotifyService({
     repos, flushScheduler, schedmgrPath, schedmgrDescriptor,

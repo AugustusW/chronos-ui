@@ -6,6 +6,36 @@ All notable changes to ChronosUI are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-09-05
+
+### Added
+- **Remove ChronosUI** — a Settings action that hands every job back to the native scheduler before
+  you delete the app. Adopted jobs return to their original crontab lines with schedules unchanged;
+  jobs created in ChronosUI keep running and only lose the `# chronos:` marker; the notification
+  entry ChronosUI installed is removed. Deleting the app without this leaves adopted jobs pointing
+  at a wrapper that no longer exists — they stop running and nothing says so. Deleting the local
+  run history and settings is a separate checkbox, off by default. If any part cannot be completed
+  (a job the scheduler no longer knows about, a file that will not delete), the dialog says which
+  and the app stays open instead of quitting on a cleanup that did not finish.
+
+### Fixed
+- Quitting could leave the app running with no window on Windows and Linux. The window-close
+  handler hides the window instead of closing, and the flag that suppressed that was set on only
+  one of the three exit paths — so quitting from anywhere else tore down the tray, timers and
+  database and then left a process only Task Manager could end. macOS never runs that interception,
+  which is why it showed no symptom there.
+- The self-cleaning notification agent (macOS) never reached installs upgraded from an earlier
+  version. It is written only when notification settings are saved, so an agent from an older build
+  survived every upgrade unchanged and would keep invoking a deleted binary after the app was
+  removed. It is now brought up to date at startup, but only when its content actually differs —
+  rewriting it on every launch would restart the flush countdown.
+- Scheduled runs recorded no history when the database is PostgreSQL (macOS and Linux). The
+  connection string was stored in the OS keychain only, and the scheduler process reads it from
+  cron, outside the desktop login session, where the keychain is unreachable. The 0600 fallback
+  file is now always written alongside the keychain item. Existing installs need the PostgreSQL
+  connection saved once in Settings to create that file. Jobs themselves always ran; only the run
+  history was lost.
+
 ## [0.4.0] — 2026-08-11
 
 ### Added

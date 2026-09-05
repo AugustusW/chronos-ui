@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 import { execFile } from 'node:child_process'
 import { parseCrontab, serializeCrontab, type CrontabModel, type ModelJob } from './crontab-model'
 import { shellQuote, shellUnquote } from './shell-quote'
-import type { AdoptOptions, AdoptionSpec, BatchWriteResult, DriftResult, ExecFn, ParsedJob, SchedulerAdapter, WriteResult } from './types'
+import type { AdoptOptions, AdoptionSpec, BatchWriteResult, DriftResult, ExecFn, ParsedJob, ReleaseResult, ReleaseSpec, SchedulerAdapter, WriteResult } from './types'
 export type { ExecFn }
 
 export interface CrontabAdapterOpts {
@@ -243,6 +243,55 @@ export class CrontabAdapter implements SchedulerAdapter {
     model.setLineRaw(j.lineIndex, `${prefix}${j.scheduleExpr} ${originalCommand}`)
     model.lines.splice(j.markerIndex, 1) // remove the marker line (above the job)
     return this.writeGuarded(model)
+  }
+
+  // teardown: release every listed job in ONE read-modify-write. Looping unadopt() N times would be
+  // N guarded writes, and a mid-way failure would leave crontab half torn down (spec §2).
+  //
+  // The two-phase order below is load-bearing (plan-advisor M2). setLineRaw does not shift indices;
+  // splicing a marker line does. So every rewrite happens first, while the parsed lineIndex values
+  // are still valid, and only then are the marker lines removed — highest index first, so an earlier
+  // removal cannot invalidate a later one.
+  async releaseAll(specs: ReleaseSpec[]): Promise<ReleaseResult> {
+    if (specs.length === 0) return { ok: true, released: [], skipped: [] }
+    // Mirror adoptMany's dedup guard (see its "Reject the batch rather than corrupt" note): two specs
+    // for one id would splice the same marker index twice and report the id twice. The caller builds
+    // specs 1:1 from unique DB rows today, so this is a guard against a future caller, not a live bug.
+    if (new Set(specs.map((s) => s.chronosId)).size !== specs.length) {
+      return { ok: false, reason: 'error', errorCode: 'invalid_input', error: 'duplicate chronosId in releaseAll batch', released: [], skipped: [] }
+    }
+    const model = await this.readNoSnapshot()
+
+    const released: number[] = []
+    const skipped: { chronosId: number; reason: 'no_match' }[] = []
+    const markerIdxs: number[] = []
+
+    // Phase 1 — rewrites only. No splice yet, so every lineIndex still points where parse said.
+    for (const spec of specs) {
+      const j = model.jobs.find((x) => x.chronosId === spec.chronosId)
+      if (!j || j.markerIndex === null) {
+        // Externally deleted or never in this crontab. Not a failure: teardown is the user's exit
+        // path and must not be blocked by one unrelated edit (spec §2, architect M3).
+        skipped.push({ chronosId: spec.chronosId, reason: 'no_match' })
+        continue
+      }
+      if (this.isAdoptedCommand(j.command)) {
+        // Restore the bare original line, preserving the disabled ('#') prefix.
+        const prefix = j.enabled ? '' : '#'
+        model.setLineRaw(j.lineIndex, `${prefix}${j.scheduleExpr} ${spec.originalCommand}`)
+      }
+      // A created (never-wrapped) job keeps its line verbatim; only its marker goes.
+      markerIdxs.push(j.markerIndex)
+      released.push(spec.chronosId)
+    }
+
+    // Phase 2 — the index-shifting part, descending so earlier splices don't move later targets.
+    for (const i of [...new Set(markerIdxs)].sort((a, b) => b - a)) model.lines.splice(i, 1)
+
+    if (released.length === 0) return { ok: true, released, skipped }
+    const w = await this.writeGuarded(model)
+    if (!w.ok) return { ...w, released: [], skipped }
+    return { ok: true, released, skipped }
   }
 
   async removeFlushEntry(): Promise<WriteResult> {

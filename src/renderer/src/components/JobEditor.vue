@@ -59,5 +59,8 @@ label{display:block;font-size:12px;font-weight:500}
 .mono{font-family:var(--p-font-mono)}textarea.in{min-height:46px;resize:vertical}
 .btn{border:1px solid var(--color-border);background:var(--color-surface);color:var(--color-text);border-radius:var(--p-radius);padding:8px 16px;cursor:pointer}
 .btn.primary{background:var(--color-primary);color:var(--color-on-primary);border-color:transparent;font-weight:500}
-.btn.danger{color:#c0392b;border-color:#c0392b;margin-right:auto}
+/* Semantic token, not a literal: the hardcoded #c0392b this replaced was both a different red from
+   the design system's --p-danger (#c0493f) and invisible to the dark-theme rebind, since only the
+   semantic layer gets redefined under [data-theme='dark']. */
+.btn.danger{color:var(--color-danger);border-color:var(--color-danger);margin-right:auto}
 </style>

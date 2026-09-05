@@ -432,3 +432,86 @@ describe('TaskSchedulerAdapter CRUD', () => {
     expect(scripts.find((s) => /Unregister-ScheduledTask/.test(s))!).toContain("-TaskName 'chronos-5'")
   })
 })
+
+describe('TaskSchedulerAdapter releaseAll (teardown)', () => {
+  // chronos-42 = adopted (schedmgr action), chronos-7 = created (cmd /c), anything else = not registered.
+  function fakeTasks() {
+    const setScripts: string[] = []
+    const exec: ExecFn = async (_c, _a, stdin) => {
+      const s = stdin ?? ''
+      if (/Set-ScheduledTask/.test(s)) {
+        setScripts.push(s)
+        return { stdout: '', exitCode: 0 }
+      }
+      if (/Get-ScheduledTask\b/.test(s) && /ConvertTo-Json/.test(s)) {
+        if (/chronos-42/.test(s)) {
+          return {
+            stdout: JSON.stringify({
+              Execute: SCHEDMGR,
+              Arguments: `run 42 --db "${DB}" -- "backup.bat"`,
+              Description: 'ChronosUI managed job\nchronos:42\nsched:daily 03:00'
+            }),
+            exitCode: 0
+          }
+        }
+        if (/chronos-7/.test(s)) {
+          return {
+            stdout: JSON.stringify({
+              Execute: 'cmd.exe',
+              Arguments: '/c created.bat',
+              Description: 'ChronosUI managed job\nchronos:7\nsched:daily 04:00'
+            }),
+            exitCode: 0
+          }
+        }
+        return { stdout: '', exitCode: 0 } // not registered
+      }
+      return { stdout: '', exitCode: 0 }
+    }
+    return { exec, setScripts }
+  }
+
+  it('restores an adopted task to its original action and clears the marker', async () => {
+    const { exec, setScripts } = fakeTasks()
+    const a = adapter(exec)
+    const r = await a.releaseAll([{ chronosId: 42, originalCommand: 'backup.bat' }])
+    expect(r.ok).toBe(true)
+    expect(r.released).toEqual([42])
+    expect(r.skipped).toEqual([])
+    const set = setScripts.find((s) => /Set-ScheduledTask/.test(s))!
+    expect(set).toContain(`New-ScheduledTaskAction -Execute 'cmd.exe'`)
+    expect(set).toContain('backup.bat')
+    expect(set).toContain('$t.Description') // marker cleared
+  })
+
+  it('leaves a created task action alone and only clears its marker', async () => {
+    const { exec, setScripts } = fakeTasks()
+    const a = adapter(exec)
+    const r = await a.releaseAll([{ chronosId: 7, originalCommand: 'created.bat' }])
+    expect(r.ok).toBe(true)
+    expect(r.released).toEqual([7])
+    const set = setScripts.find((s) => /Set-ScheduledTask/.test(s))!
+    expect(set).toContain('$t.Description')
+    expect(set).not.toContain('New-ScheduledTaskAction') // action untouched
+  })
+
+  it('reports an unregistered task as skipped and keeps going (no batch abort)', async () => {
+    const { exec } = fakeTasks()
+    const a = adapter(exec)
+    const r = await a.releaseAll([
+      { chronosId: 99, originalCommand: 'gone.bat' },
+      { chronosId: 42, originalCommand: 'backup.bat' }
+    ])
+    expect(r.ok).toBe(true)
+    expect(r.released).toEqual([42]) // 99 失敗沒有擋住 42
+    expect(r.skipped).toEqual([{ chronosId: 99, reason: 'no_match' }])
+  })
+
+  it('is a no-op with an empty list', async () => {
+    const { exec, setScripts } = fakeTasks()
+    const a = adapter(exec)
+    const r = await a.releaseAll([])
+    expect(r.ok).toBe(true)
+    expect(setScripts).toHaveLength(0)
+  })
+})

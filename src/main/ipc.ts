@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { ipcMain } from 'electron'
-import { IPC, type AppVersion } from '../shared/ipc-contract'
+import { IPC, type AppVersion, type TeardownResult } from '../shared/ipc-contract'
 import { isNotifyTokenFormat, isChatIdFormat } from '../shared/notify-validation'
 import type {
   CreateJobInput, UpdateJobChanges, AdoptItem, ReconcileResult, RunNowResult, PgDsnParts, PgSaveSwitchInput, PgSaveSwitchResult, PgStatus, DashboardSummary,
@@ -124,6 +124,15 @@ export async function handleJobsAdopt(deps: IpcDeps, payload: unknown): Promise<
 export async function handleJobsUnadopt(deps: IpcDeps, payload: unknown): Promise<WriteResult> {
   const id = (payload as { id?: unknown })?.id
   return isPosInt(id) ? deps.service.unadopt(id) : bad('invalid id')
+}
+// Takes ONE boolean and nothing else. Any path in the payload is dropped on the floor: the renderer
+// must never be able to steer what teardown deletes (spec NFR, security).
+export async function handleAppTeardown(deps: IpcDeps, payload: unknown): Promise<TeardownResult> {
+  const deleteData = (payload as { deleteData?: unknown })?.deleteData
+  if (typeof deleteData !== 'boolean') {
+    return { ok: false, error: 'deleteData must be a boolean', released: [], skipped: [], deleteFailed: [] }
+  }
+  return deps.service.teardown({ deleteData })
 }
 export async function handleJobsForget(deps: IpcDeps, payload: unknown): Promise<WriteResult> {
   const id = (payload as { id?: unknown })?.id
@@ -341,6 +350,7 @@ export function registerIpcHandlers(deps: IpcDeps): void {
   ipcMain.handle(IPC.jobsDelete, (_e, p) => handleJobsDelete(deps, p))
   ipcMain.handle(IPC.jobsAdopt, (_e, p) => handleJobsAdopt(deps, p))
   ipcMain.handle(IPC.jobsUnadopt, (_e, p) => handleJobsUnadopt(deps, p))
+  ipcMain.handle(IPC.appTeardown, (_e, p) => handleAppTeardown(deps, p))
   ipcMain.handle(IPC.jobsForget, (_e, p) => handleJobsForget(deps, p))
   ipcMain.handle(IPC.jobsRunNow, (_e, p) => handleJobsRunNow(deps, p))
   ipcMain.handle(IPC.runsListForJob, (_e, p) => handleRunsListForJob(deps, p))
