@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { Job, RunLog } from '../main/db/schema'
+import type { Job, RunLog, JobRevision } from '../main/db/schema'
+export type { JobRevision }
 import type { ParsedJob, BatchWriteResult, WriteResult } from '../main/scheduler/types'
 import type { TeardownResult } from '../main/services/jobs.service'
 import type { PgDsnParts } from '../main/services/pg-dsn'
@@ -40,7 +41,14 @@ export const IPC = {
   runsSearch: 'runs:search',
   jobsExportYaml: 'jobs:exportYaml',
   jobsImportPreview: 'jobs:importPreview',
-  jobsImportApply: 'jobs:importApply'
+  jobsImportApply: 'jobs:importApply',
+  // A job's configuration change log. Read-only — reverting is an ordinary jobs:update
+  // with the old values, so it goes through the same validation and the same adapter guards.
+  jobsRevisions: 'jobs:revisions',
+  // Push the DB's schedule + command back into the native scheduler. Separate from jobs:update
+  // because update() only forwards a field that differs from the DB row, and restoring an external
+  // change means re-sending values the DB already holds.
+  jobsRestoreToScheduler: 'jobs:restoreToScheduler'
 } as const
 
 export interface AppVersion {

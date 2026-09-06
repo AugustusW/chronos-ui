@@ -36,7 +36,7 @@ if (process.env.TEST_PG_URL) {
       // would leave the journal, making migratePg skip table creation on the 2nd+ test.
       // ALL tables must be dropped (not just jobs/run_logs): a persisting notify_settings would make
       // a re-applied ADD COLUMN migration (e.g. 0002 includeStderr) fail "column already exists".
-      await h.pool!.query('DROP SCHEMA IF EXISTS drizzle CASCADE; DROP TABLE IF EXISTS run_logs, notify_outbox, notify_settings, jobs CASCADE')
+      await h.pool!.query('DROP SCHEMA IF EXISTS drizzle CASCADE; DROP TABLE IF EXISTS job_revisions, run_logs, notify_outbox, notify_settings, jobs CASCADE')
       await migratePg(h.db as never, { migrationsFolder: PG_MIGRATIONS })
       return h
     }
@@ -93,6 +93,67 @@ for (const backend of backends) {
       await repos.jobs.remove(j.id)
       expect(await repos.jobs.get(j.id)).toBeUndefined()
       expect(await repos.runLogs.listForJob(j.id)).toEqual([])
+    })
+
+    // job_revisions through the SAME harness as everything else: the pg repository is a
+    // hand-written mirror with `as JobRevision` casts on every return, so without running it
+    // against a real Postgres the entire pg half of a dual-dialect feature is unexercised.
+    it('records a revision and reads it back, json columns intact', async () => {
+      const j = await repos.jobs.create({ ...baseJob })
+      const rec = await repos.jobRevisions.record({
+        jobId: j.id, source: 'edit', changedFields: ['command', 'env'],
+        before: { command: 'a', env: null }, after: { command: 'b', env: { TOKEN: 'x' } }
+      })
+      expect(rec.id).toBeGreaterThan(0)
+      expect(rec.changedAt).toBeInstanceOf(Date)
+      const [row] = await repos.jobRevisions.listForJob(j.id)
+      expect(row.changedFields).toEqual(['command', 'env'])
+      expect(row.before).toEqual({ command: 'a', env: null })
+      expect(row.after).toEqual({ command: 'b', env: { TOKEN: 'x' } })
+    })
+
+    it('lists revisions newest first, honours the limit, and scopes to one job', async () => {
+      const a = await repos.jobs.create({ ...baseJob })
+      const b = await repos.jobs.create({ ...baseJob })
+      for (let i = 0; i < 3; i++) {
+        await repos.jobRevisions.record({
+          jobId: a.id, source: 'edit', changedFields: ['command'],
+          before: { command: `c${i}` }, after: { command: `c${i + 1}` },
+          changedAt: new Date(1_700_000_000_000 + i * 1000)
+        })
+      }
+      const rows = await repos.jobRevisions.listForJob(a.id, 2)
+      expect(rows.map((r) => (r.after as { command: string }).command)).toEqual(['c3', 'c2'])
+      expect(await repos.jobRevisions.listForJob(b.id)).toEqual([])
+    })
+
+    it('getLatest filters by source and returns undefined when there is none', async () => {
+      const j = await repos.jobs.create({ ...baseJob })
+      await repos.jobRevisions.record({ jobId: j.id, source: 'external', changedFields: ['command'], before: { command: 'x' }, after: { command: 'y' }, changedAt: new Date(1000) })
+      await repos.jobRevisions.record({ jobId: j.id, source: 'edit', changedFields: ['command'], before: { command: 'y' }, after: { command: 'z' }, changedAt: new Date(2000) })
+      expect((await repos.jobRevisions.getLatest(j.id))?.source).toBe('edit')
+      expect((await repos.jobRevisions.getLatest(j.id, 'external'))?.after).toEqual({ command: 'y' })
+      expect(await repos.jobRevisions.getLatest(j.id, 'unadopt')).toBeUndefined()
+    })
+
+    it('getLatest accepts a set of sources — the query the drift logic runs through', async () => {
+      const j = await repos.jobs.create({ ...baseJob })
+      await repos.jobRevisions.record({ jobId: j.id, source: 'external', changedFields: ['command'], before: { command: 'a' }, after: { command: 'b' }, changedAt: new Date(1000) })
+      await repos.jobRevisions.record({ jobId: j.id, source: 'resolved', changedFields: ['command'], before: { command: 'b' }, after: { command: 'a' }, changedAt: new Date(2000) })
+      await repos.jobRevisions.record({ jobId: j.id, source: 'edit', changedFields: ['name'], before: { name: 'x' }, after: { name: 'y' }, changedAt: new Date(3000) })
+
+      // The newest of {external, resolved} — an unrelated newer `edit` must not be returned, or
+      // "is this difference still standing?" gets the wrong answer.
+      const latest = await repos.jobRevisions.getLatest(j.id, ['external', 'resolved'])
+      expect(latest?.source).toBe('resolved')
+      expect(await repos.jobRevisions.getLatest(j.id, ['adopt', 'unadopt'])).toBeUndefined()
+    })
+
+    it('removing a job cascades its revisions', async () => {
+      const j = await repos.jobs.create({ ...baseJob })
+      await repos.jobRevisions.record({ jobId: j.id, source: 'edit', changedFields: ['name'], before: {}, after: {} })
+      await repos.jobs.remove(j.id)
+      expect(await repos.jobRevisions.listForJob(j.id)).toEqual([])
     })
 
     it('startRun then finishRun records result, duration, truncation', async () => {

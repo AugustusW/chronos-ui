@@ -43,6 +43,13 @@
       "when": 1786405202030,
       "tag": "0005_chemical_satana",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1788670165832,
+      "tag": "0006_regular_scream",
+      "breakpoints": true
     }
   ]
 }

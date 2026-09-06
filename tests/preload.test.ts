@@ -12,7 +12,7 @@ describe('preload chronos api', () => {
   it('exposes every Plan 5 method on window.chronos', async () => {
     await import('../src/preload/index')
     const api = exposed.chronos as Record<string, unknown>
-    for (const m of ['getVersion', 'listJobs', 'reconcile', 'createJob', 'updateJob', 'enableJob', 'disableJob', 'deleteJob', 'adoptJobs', 'unadoptJob', 'runNow', 'listRuns']) {
+    for (const m of ['getVersion', 'listJobs', 'reconcile', 'createJob', 'updateJob', 'enableJob', 'disableJob', 'deleteJob', 'adoptJobs', 'unadoptJob', 'runNow', 'listRuns', 'listRevisions', 'restoreToScheduler']) {
       expect(typeof api[m]).toBe('function')
     }
   })

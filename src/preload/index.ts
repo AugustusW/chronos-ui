@@ -4,7 +4,7 @@ import { IPC, type TeardownResult } from '../shared/ipc-contract'
 import type {
   AppVersion, ReconcileResult, CreateJobInput, UpdateJobChanges, AdoptItem, RunNowResult, Job, RunLog, WriteResult, BatchWriteResult, RunEvent,
   NotifySettingsDTO, NotifySaveInput, SaveResult, PgDsnParts, PgSaveSwitchInput, PgSaveSwitchResult, TestConnectionResult, PgStatus, DashboardSummary,
-  RunSearchInput, RunLogWithJob, RunDurationTrendPoint, YamlJobEntry, ExportYamlResult, ImportPreviewResult, ImportApplyResult
+  RunSearchInput, RunLogWithJob, RunDurationTrendPoint, YamlJobEntry, ExportYamlResult, ImportPreviewResult, ImportApplyResult, JobRevision
 } from '../shared/ipc-contract'
 
 const api = {
@@ -23,6 +23,8 @@ const api = {
   forgetJob: (id: number): Promise<WriteResult> => ipcRenderer.invoke(IPC.jobsForget, { id }),
   runNow: (id: number): Promise<RunNowResult> => ipcRenderer.invoke(IPC.jobsRunNow, { id }),
   listRuns: (jobId: number, limit?: number): Promise<RunLog[]> => ipcRenderer.invoke(IPC.runsListForJob, { jobId, limit }),
+  listRevisions: (jobId: number, limit?: number): Promise<JobRevision[]> => ipcRenderer.invoke(IPC.jobsRevisions, { jobId, limit }),
+  restoreToScheduler: (id: number): Promise<WriteResult> => ipcRenderer.invoke(IPC.jobsRestoreToScheduler, { id }),
   recentRuns: (limit?: number): Promise<RunLog[]> => ipcRenderer.invoke(IPC.runsRecent, { limit }),
   runNowStreaming: (id: number): Promise<void> => ipcRenderer.invoke(IPC.jobsRunNowStreaming, { id }),
   cancelBatch: (): Promise<void> => ipcRenderer.invoke(IPC.jobsRunBatchCancel),

@@ -174,6 +174,13 @@ maybeDescribe('backend-switch.ts (real Postgres, TEST_PG_URL)', () => {
       }
       expect(nulSampleId).toBeGreaterThan(0)
 
+      // A revision on the source: job_revisions must survive the switch like every other table.
+      // Without a seeded row the count assertion below would pass on a table that is never copied.
+      await repos.jobRevisions.record({
+        jobId: job.id, source: 'edit', changedFields: ['command'],
+        before: { command: 'old' }, after: { command: 'new' }
+      })
+
       await repos.notifySettings.save({ enabled: true, chatId: '123', windowMin: 5, includeStderr: false })
 
       await withFreshDatabase('chronos_bswitch_t7_copy', async (dsn) => {
@@ -182,13 +189,18 @@ maybeDescribe('backend-switch.ts (real Postgres, TEST_PG_URL)', () => {
 
         const result = await copyData(sqliteHandle, dsn)
         expect(result.ok).toBe(true)
-        expect(result.counts).toEqual({ jobs: 1, runLogs: RUN_COUNT, notifySettings: 1, notifyOutbox: 0 })
+        expect(result.counts).toEqual({ jobs: 1, jobRevisions: 1, runLogs: RUN_COUNT, notifySettings: 1, notifyOutbox: 0 })
 
         const target = createDatabase({ dialect: 'postgres', dsn })
         try {
           const targetRepos = createRepositories(target)
           // ids preserved
           expect((await targetRepos.jobs.get(job.id))?.name).toBe('seed-job')
+          // the change log came across intact, json columns included
+          const copiedRevisions = await targetRepos.jobRevisions.listForJob(job.id)
+          expect(copiedRevisions).toHaveLength(1)
+          expect(copiedRevisions[0].before).toEqual({ command: 'old' })
+          expect(copiedRevisions[0].changedFields).toEqual(['command'])
           // full read, not capped at the repo default of 50
           const allRuns = await targetRepos.runLogs.listForJob(job.id, 1000)
           expect(allRuns.length).toBe(RUN_COUNT)

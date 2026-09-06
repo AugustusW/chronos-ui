@@ -7,7 +7,7 @@ import * as pgSchema from '../../src/main/db/schema.pg'
 // The two Drizzle schemas (sqlite + pg) must never silently diverge: same tables, same column
 // keys, same SQL column names, same notNull. Types differ by dialect and are intentionally not
 // compared here (that is the dialect mapping's job).
-const TABLES = ['jobs', 'runLogs'] as const
+const TABLES = ['jobs', 'jobRevisions', 'runLogs'] as const
 
 describe('schema parity (sqlite vs pg)', () => {
   for (const key of TABLES) {

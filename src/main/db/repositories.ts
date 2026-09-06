@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { DatabaseHandle, SqliteDb, PgDb } from './client'
-import type { Job, NewJob, RunLog } from './schema'
+import type { Job, NewJob, RunLog, JobRevision } from './schema'
 import * as sq from './jobs.repository'
+import * as sjr from './jobRevisions.repository'
 import * as sr from './runLogs.repository'
 import * as sd from './dashboard.repository'
 import { createPgJobsRepo } from './jobs.repository.pg'
+import { createPgJobRevisionsRepo } from './jobRevisions.repository.pg'
 import { createPgRunLogsRepo } from './runLogs.repository.pg'
 import { createPgDashboardRepo } from './dashboard.repository.pg'
 import { createSqliteNotifySettingsRepo, type NotifySettingsRepo } from './notifySettings.repository'
@@ -18,6 +20,9 @@ export type { FailureRow, RunOutcomeRow }
 // Same pattern for the v0.4.0 Run History search + trend-sparkline types (runLogs.repository.ts).
 import type { RunDurationPoint, RunLogWithJob, RunSearchFilters } from './runLogs.repository'
 export type { RunDurationPoint, RunLogWithJob, RunSearchFilters }
+// Same pattern for the job-revision history types (jobRevisions.repository.ts).
+import type { RecordRevisionInput, RevisionSource } from './jobRevisions.repository'
+export type { RecordRevisionInput, RevisionSource }
 
 type RunResult = 'success' | 'failure' | 'timeout'
 type TriggeredBy = 'schedule' | 'manual'
@@ -36,6 +41,15 @@ export interface JobsRepo {
   update(id: number, patch: Partial<NewJob>): Promise<Job | undefined>
   remove(id: number): Promise<void>
   setCachedRun(id: number, data: { lastRunAt: Date; lastResult: RunResult }): Promise<void>
+}
+
+export interface JobRevisionsRepo {
+  record(input: RecordRevisionInput): Promise<JobRevision>
+  listForJob(jobId: number, limit?: number): Promise<JobRevision[]>
+  /** Newest revision, optionally restricted to one source or a set of them. Reading the newest of
+   *  {external, resolved} is how "is this drift still standing?" is answered from the database
+   *  rather than from process memory. */
+  getLatest(jobId: number, source?: RevisionSource | readonly RevisionSource[]): Promise<JobRevision | undefined>
 }
 
 export interface RunLogsRepo {
@@ -64,6 +78,7 @@ export interface DashboardRepo {
 
 export interface Repositories {
   jobs: JobsRepo
+  jobRevisions: JobRevisionsRepo
   runLogs: RunLogsRepo
   notifySettings: NotifySettingsRepo
   dashboard: DashboardRepo
@@ -83,6 +98,11 @@ function sqliteRepos(db: SqliteDb): Repositories {
       setCachedRun: async (id, data) => {
         sq.setJobCachedRun(db, id, data)
       }
+    },
+    jobRevisions: {
+      record: async (input) => sjr.recordRevision(db, input),
+      listForJob: async (jobId, limit) => sjr.listRevisionsForJob(db, jobId, limit),
+      getLatest: async (jobId, source) => sjr.getLatestRevision(db, jobId, source)
     },
     runLogs: {
       startRun: async (input) => sr.startRun(db, input),
@@ -111,6 +131,7 @@ export function createRepositories(handle: DatabaseHandle): Repositories {
     const db = handle.db as PgDb
     return {
       jobs: createPgJobsRepo(db),
+      jobRevisions: createPgJobRevisionsRepo(db),
       runLogs: createPgRunLogsRepo(db),
       notifySettings: createPgNotifySettingsRepo(db),
       dashboard: createPgDashboardRepo(db)

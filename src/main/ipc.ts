@@ -9,7 +9,7 @@ import type {
 import type { JobsService } from './services/jobs.service'
 import type { NotifyService, NotifySaveInput } from './services/notify.service'
 import type { JobIoService } from './services/job-io.service'
-import type { RunLog } from './db/schema'
+import type { RunLog, JobRevision } from './db/schema'
 import type { RunSearchFilters } from './db/repositories'
 import type { WriteResult, BatchWriteResult } from './scheduler/types'
 import { buildDsn } from './services/pg-dsn'
@@ -24,6 +24,7 @@ export interface IpcDeps {
   notify: NotifyService
   runNow: (id: number) => Promise<RunNowResult>
   listRunsForJob: (jobId: number, limit?: number) => Promise<RunLog[]>
+  listRevisionsForJob: (jobId: number, limit?: number) => Promise<JobRevision[]>
   recentRuns: (limit?: number) => Promise<RunLog[]>
   runNowStreaming: (id: number) => Promise<void>
   cancelBatch: () => void
@@ -59,6 +60,9 @@ export function handleGetVersion(meta: { name: string; version: string }): AppVe
 }
 
 export const MAX_RUN_LIST_LIMIT = 1000
+/** Same boundary cap as run history: a renderer asking for everything must not be able to pull an
+ *  unbounded result set across the IPC bridge. */
+export const MAX_REVISION_LIST_LIMIT = 500
 
 const isPosInt = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v) && v > 0
 const isStr = (v: unknown): v is string => typeof v === 'string'
@@ -159,6 +163,17 @@ export function handleRunsListForJob(deps: IpcDeps, payload: unknown): Promise<R
   if (!isPosInt(p?.jobId)) throw new Error('invalid jobId') // sync throw at the boundary (kept non-async)
   const limit = isPosInt(p.limit) ? Math.min(p.limit, MAX_RUN_LIST_LIMIT) : undefined // cap (code review #5)
   return deps.listRunsForJob(p.jobId, limit)
+}
+export function handleJobRevisions(deps: IpcDeps, payload: unknown): Promise<JobRevision[]> {
+  const p = payload as { jobId?: unknown; limit?: unknown }
+  if (!isPosInt(p?.jobId)) throw new Error('invalid jobId') // sync throw at the boundary (kept non-async)
+  const limit = isPosInt(p.limit) ? Math.min(p.limit, MAX_REVISION_LIST_LIMIT) : undefined
+  return deps.listRevisionsForJob(p.jobId, limit)
+}
+export function handleJobRestoreToScheduler(deps: IpcDeps, payload: unknown): Promise<WriteResult> {
+  const p = payload as { id?: unknown }
+  if (!isPosInt(p?.id)) throw new Error('invalid id')
+  return deps.service.restoreToScheduler(p.id)
 }
 export function handleRunsRecent(deps: IpcDeps, payload: unknown): Promise<RunLog[]> {
   const p = payload as { limit?: unknown }
@@ -354,6 +369,8 @@ export function registerIpcHandlers(deps: IpcDeps): void {
   ipcMain.handle(IPC.jobsForget, (_e, p) => handleJobsForget(deps, p))
   ipcMain.handle(IPC.jobsRunNow, (_e, p) => handleJobsRunNow(deps, p))
   ipcMain.handle(IPC.runsListForJob, (_e, p) => handleRunsListForJob(deps, p))
+  ipcMain.handle(IPC.jobsRevisions, (_e, p) => handleJobRevisions(deps, p))
+  ipcMain.handle(IPC.jobsRestoreToScheduler, (_e, p) => handleJobRestoreToScheduler(deps, p))
   ipcMain.handle(IPC.runsRecent, (_e, p) => handleRunsRecent(deps, p))
   ipcMain.handle(IPC.jobsRunNowStreaming, (_e, p) => handleJobsRunNowStreaming(deps, p))
   ipcMain.handle(IPC.jobsRunBatchCancel, () => handleJobsRunBatchCancel(deps))

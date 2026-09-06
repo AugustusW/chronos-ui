@@ -52,6 +52,24 @@ export const runLogs = pgTable('run_logs', {
   startedResultIdx: index('run_logs_startedAt_result_idx').on(t.startedAt, t.result)
 }))
 
+// Mirrors jobRevisions in schema.ts — see that file for why this table exists. Kept row-shape
+// identical (schema-parity.ts asserts it at compile time; schema-parity.test.ts at runtime).
+export const jobRevisions = pgTable('job_revisions', {
+  id: serial('id').primaryKey(),
+  jobId: integer('jobId')
+    .notNull()
+    .references(() => jobs.id, { onDelete: 'cascade' }),
+  changedAt: ts('changedAt')
+    .notNull()
+    .$defaultFn(() => new Date()),
+  source: text('source', { enum: ['edit', 'adopt', 'unadopt', 'external', 'resolved'] }).notNull(),
+  changedFields: jsonb('changedFields').$type<string[]>().notNull(),
+  before: jsonb('before').$type<Record<string, unknown>>().notNull(),
+  after: jsonb('after').$type<Record<string, unknown>>().notNull()
+}, (t) => ({
+  jobChangedIdx: index('job_revisions_jobId_changedAt_id_idx').on(t.jobId, t.changedAt, t.id)
+}))
+
 export const notifySettings = pgTable('notify_settings', {
   id: integer('id').primaryKey(),
   enabled: boolean('enabled').notNull().default(false),
@@ -80,6 +98,8 @@ export type Job = typeof jobs.$inferSelect
 export type NewJob = typeof jobs.$inferInsert
 export type RunLog = typeof runLogs.$inferSelect
 export type NewRunLog = typeof runLogs.$inferInsert
+export type JobRevision = typeof jobRevisions.$inferSelect
+export type NewJobRevision = typeof jobRevisions.$inferInsert
 export type NotifySettings = typeof notifySettings.$inferSelect
 export type NewNotifySettings = typeof notifySettings.$inferInsert
 export type NotifyOutbox = typeof notifyOutbox.$inferSelect

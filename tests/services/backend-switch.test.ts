@@ -231,7 +231,7 @@ describe('switchToPostgres (T8, mocked steps)', () => {
   const configApp = () => ({ getPath: () => dir })
   const OK_TEST: TestConnectionResult = { ok: true, version: 'PostgreSQL 16', ms: 5 }
   const OK_MIGRATE: MigrateTargetResult = { ok: true }
-  const OK_COPY: CopyDataResult = { ok: true, counts: { jobs: 1, runLogs: 2, notifySettings: 1, notifyOutbox: 0 } }
+  const OK_COPY: CopyDataResult = { ok: true, counts: { jobs: 1, jobRevisions: 0, runLogs: 2, notifySettings: 1, notifyOutbox: 0 } }
   const OK_REBAKE: RebakeResult = { ok: true, rebaked: [1], errors: [] }
 
   function baseDeps(over: Partial<SwitchToPostgresDeps> = {}): SwitchToPostgresDeps {

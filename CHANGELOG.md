@@ -6,6 +6,58 @@ All notable changes to ChronosUI are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-09-06
+
+A job now remembers what it used to be.
+
+### Added
+- **A job now keeps a history of its own configuration changes.** Run history records that a run
+  happened, never the command it ran, so until now an edit was unrecoverable the moment it landed:
+  the most anyone could tell was that the configuration had changed at some timestamp, with no
+  before value. Each change is stored as a diff — only the fields that actually changed, with both
+  sides — and shown on the job's detail screen next to its runs, with a revert for the ones that
+  can be reverted.
+- **Edits made outside ChronosUI are recorded too.** Editing crontab or Task Scheduler directly
+  never goes through the app, but the reconcile pass already compares what ChronosUI last knew
+  against what is there now; a difference it finds is written to the history as `changed outside
+  ChronosUI` rather than only being flagged on screen. An unresolved difference is re-observed on
+  every refresh and by the background poll, so it is recorded once, not once per observation —
+  while an edit that is undone and then made again is recorded each time, including when both
+  happened while the app was closed.
+- **Putting a scheduler entry back is recorded as well.** When a job that had drifted comes back
+  into agreement with ChronosUI, the history gets a `put back` entry closing the earlier one out,
+  recording where the scheduler actually ended up rather than assuming it returned to where it
+  started — resolving a difference by editing the job to a third value is recorded as such.
+  Deleting the entry is not a resolution and is not recorded as one.
+  Without it a job's history could end at "command changed to something else" long after someone
+  had already reverted it, and an identical change made later would have been mistaken for that
+  same standing difference and dropped.
+  Scope: this covers the schedule, the command and the enabled flag — the three fields reconcile
+  compares. Deleting a job's entry outside ChronosUI is shown in the job list as missing but is not
+  written to the history. On Windows, an external edit to a task's *trigger* is not detected at all
+  (the schedule is read from a marker ChronosUI itself wrote); external *command* edits are.
+- **Restoring an entry someone changed outside the app.** A change made outside ChronosUI leaves
+  the app still holding the old values, so "undo" here means writing them back into the system
+  scheduler rather than editing the job — the Changes list offers that as its own action, on the
+  most recent external change (it restores the whole job, not one revision). The schedule, the
+  command and the enabled state are all put back. On an adopted job whose *command* was changed
+  outside, the scheduler adapter refuses an in-place command change; that refusal is shown rather
+  than worked around, and a schedule-only change on an adopted job restores normally.
+- **Adopting and un-adopting are recorded as changes.** On cron this matters more than it sounds:
+  an adopted job's command cannot be edited in place — the adapter refuses it and the change has to
+  go through un-adopt and re-adopt — so a history that skipped the round trip would be blank
+  exactly where command changes happen.
+- **Creating a job records no revision** (the history is a log of changes, not a snapshot of
+  origins), and deleting a job deletes its history with it.
+- **Reverting says what it could not restore.** Putting an optional field back to "not set" cannot
+  be expressed through the update API, so a revert that hits one reports it by name instead of
+  reporting a clean success.
+- **A job's change history is copied when the database backend is switched**, alongside jobs, runs
+  and notification settings. Note that the history holds the old and new values of every tracked
+  field, environment variables included, so switching to a PostgreSQL server copies those values
+  onto it — the same values `jobs` already stores, but now on whatever host that database runs.
+
+
 ## [0.6.0] — 2026-09-05
 
 Adopting an existing scheduled task now works on Windows. It never had.
@@ -175,7 +227,8 @@ Windows fixes, plus one that turned out to affect every platform.
 - Initial public release: read your native scheduler (crontab on macOS/Linux, Task Scheduler on
   Windows) in a GUI, adopt jobs to record output, run-now with live output.
 
-[Unreleased]: https://github.com/AugustusW/chronos-ui/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/AugustusW/chronos-ui/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/AugustusW/chronos-ui/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/AugustusW/chronos-ui/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/AugustusW/chronos-ui/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/AugustusW/chronos-ui/compare/v0.4.0...v0.5.0

@@ -58,6 +58,31 @@ export const runLogs = sqliteTable('run_logs', {
   startedResultIdx: index('run_logs_startedAt_result_idx').on(t.startedAt, t.result)
 }))
 
+// A job's configuration change log. Answers "what did this job look like before?" —
+// run_logs records that a run happened, never the command it ran, so without this table an edit
+// is unrecoverable the moment it lands. `before`/`after` carry ONLY the fields that actually
+// changed (listed in `changedFields`), which keeps a row small and makes the UI a plain
+// key → before/after render. `source` says which path produced the change: a user edit, an
+// adopt/unadopt round trip (the only way an adopted job's command can change — updateJob refuses
+// it in place), or an external edit someone made in crontab/Task Scheduler behind our back.
+export const jobRevisions = sqliteTable('job_revisions', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  jobId: integer('jobId')
+    .notNull()
+    .references(() => jobs.id, { onDelete: 'cascade' }),
+  changedAt: integer('changedAt', { mode: 'timestamp_ms' })
+    .notNull()
+    .$defaultFn(() => new Date()),
+  source: text('source', { enum: ['edit', 'adopt', 'unadopt', 'external', 'resolved'] }).notNull(),
+  changedFields: text('changedFields', { mode: 'json' }).$type<string[]>().notNull(),
+  before: text('before', { mode: 'json' }).$type<Record<string, unknown>>().notNull(),
+  after: text('after', { mode: 'json' }).$type<Record<string, unknown>>().notNull()
+}, (t) => ({
+  // The history query is WHERE jobId=? ORDER BY changedAt DESC, id DESC — the same shape as
+  // run_logs' hot query, and the same reason for an ASC composite index (served by reverse scan).
+  jobChangedIdx: index('job_revisions_jobId_changedAt_id_idx').on(t.jobId, t.changedAt, t.id)
+}))
+
 export const notifySettings = sqliteTable('notify_settings', {
   id: integer('id').primaryKey(), // always 1 (singleton)
   enabled: integer('enabled', { mode: 'boolean' }).notNull().default(false),
@@ -88,6 +113,8 @@ export type Job = typeof jobs.$inferSelect
 export type NewJob = typeof jobs.$inferInsert
 export type RunLog = typeof runLogs.$inferSelect
 export type NewRunLog = typeof runLogs.$inferInsert
+export type JobRevision = typeof jobRevisions.$inferSelect
+export type NewJobRevision = typeof jobRevisions.$inferInsert
 export type NotifySettings = typeof notifySettings.$inferSelect
 export type NewNotifySettings = typeof notifySettings.$inferInsert
 export type NotifyOutbox = typeof notifyOutbox.$inferSelect
