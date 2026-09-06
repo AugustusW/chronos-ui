@@ -127,6 +127,11 @@ maybeDescribe('backend-switch.ts end-to-end scenario (real Postgres, TEST_PG_URL
     expect(nulSampleId).toBeGreaterThan(0)
     expect(utf8SampleId).toBeGreaterThan(0)
 
+    await repos.jobRevisions.record({
+      jobId: adoptedJobA.id, source: 'external', changedFields: ['command'],
+      before: { command: 'nightly-backup.sh' }, after: { command: 'someone-elses.sh' }
+    })
+
     await repos.notifySettings.save({ enabled: true, chatId: '999888777', windowMin: 10, includeStderr: true })
 
     // notify_outbox has no TS repo layer at all (only the Go schedmgr reads/writes it — see
@@ -209,11 +214,16 @@ maybeDescribe('backend-switch.ts end-to-end scenario (real Postgres, TEST_PG_URL
       try {
         const targetRepos = createRepositories(target)
 
-        // 4-table counts match the source exactly: jobs=3, run_logs=63 (proves the repo layer's
+        // 5-table counts match the source exactly: jobs=3, run_logs=63 (proves the repo layer's
         // listForJob/listRecent default limit(50) never silently truncated the copy — copyData
         // reads straight off the Drizzle schema, not through that capped repo method), notify_
         // settings=1, notify_outbox=2.
         expect((await targetRepos.jobs.list()).length).toBe(3)
+        // job_revisions travels too — losing the change log on a backend switch would be exactly
+        // the silent history loss this table exists to prevent.
+        const copiedRevisions = await targetRepos.jobRevisions.listForJob(adoptedJobA.id)
+        expect(copiedRevisions).toHaveLength(1)
+        expect(copiedRevisions[0].after).toEqual({ command: 'someone-elses.sh' })
         const allRunsA = await targetRepos.runLogs.listForJob(adoptedJobA.id, 1000)
         const allRunsB = await targetRepos.runLogs.listForJob(adoptedJobB.id, 1000)
         expect(allRunsA.length + allRunsB.length).toBe(RUN_COUNT)

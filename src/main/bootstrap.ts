@@ -458,6 +458,7 @@ export async function buildMainDeps(app: App, opts: BuildOpts = {}): Promise<Bui
     notify,
     runNow: (id) => runNow(id, { jobs: repos.jobs, runLogs: repos.runLogs, schedmgrPath, dbPath: schedmgrDescriptor, spawn: opts.spawn ?? ((c, a) => spawn(c, a)) }),
     listRunsForJob: (jobId, limit) => repos.runLogs.listForJob(jobId, limit),
+    listRevisionsForJob: (jobId, limit) => repos.jobRevisions.listForJob(jobId, limit),
     recentRuns: (limit) => repos.runLogs.listRecent(limit),
     runNowStreaming,
     cancelBatch: () => batch.cancel(),

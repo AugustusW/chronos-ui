@@ -4,7 +4,7 @@ import {
   handlePgTestConnection, handlePgSaveSwitch, handlePgGetStatus, handleDashboardSummary,
   handleRunsSearch, handleJobsRunDurationTrend, handleJobsExportYaml, handleJobsImportPreview, handleJobsImportApply,
   handleAppTeardown,
-  MAX_BATCH_ADOPT, MAX_RUN_LIST_LIMIT, type IpcDeps
+  MAX_BATCH_ADOPT, MAX_RUN_LIST_LIMIT, MAX_REVISION_LIST_LIMIT, handleJobRevisions, handleJobRestoreToScheduler, type IpcDeps
 } from '../src/main/ipc'
 import type { DashboardSummary } from '../src/shared/ipc-contract'
 import { buildDsn, type PgDsnParts } from '../src/main/services/pg-dsn'
@@ -28,10 +28,12 @@ const deps = (over: Partial<IpcDeps> = {}): IpcDeps => ({
     create: async () => ({ ok: true }), update: async () => ({ ok: true }),
     enable: async () => ({ ok: true }), disable: async () => ({ ok: true }),
     remove: async () => ({ ok: true }), adopt: async () => ({ ok: true, adopted: [] }),
-    unadopt: async () => ({ ok: true }), list: async () => ({ items: [], generatedAt: 0 })
+    unadopt: async () => ({ ok: true }), list: async () => ({ items: [], generatedAt: 0 }),
+    restoreToScheduler: async () => ({ ok: true })
   } as unknown as IpcDeps['service'],
   runNow: async () => ({ status: 'ui_timeout', jobId: 1, waitedMs: 0 }),
   listRunsForJob: () => [],
+  listRevisionsForJob: () => [],
   recentRuns: () => [],
   runNowStreaming: async () => {},
   cancelBatch: () => {},
@@ -523,5 +525,47 @@ describe('handleAppTeardown', () => {
     const r = await handleAppTeardown(d, { deleteData: false })
     expect(r.ok).toBe(true)
     expect(calls).toEqual([{ deleteData: false }])
+  })
+})
+
+describe('handleJobRevisions', () => {
+  it('rejects a missing or invalid jobId at the boundary', () => {
+    const d = deps()
+    expect(() => handleJobRevisions(d, {})).toThrow('invalid jobId')
+    expect(() => handleJobRevisions(d, { jobId: 0 })).toThrow('invalid jobId')
+    expect(() => handleJobRevisions(d, { jobId: '1' })).toThrow('invalid jobId')
+  })
+  it('passes jobId and a valid limit through', () => {
+    let got: [number, number | undefined] = [0, 0]
+    const d = deps({ listRevisionsForJob: (jobId, limit) => { got = [jobId, limit]; return [] } })
+    handleJobRevisions(d, { jobId: 7, limit: 20 })
+    expect(got).toEqual([7, 20])
+  })
+  it(`caps limit at MAX_REVISION_LIST_LIMIT (${MAX_REVISION_LIST_LIMIT})`, () => {
+    let got: number | undefined = 0
+    const d = deps({ listRevisionsForJob: (_jobId, limit) => { got = limit; return [] } })
+    handleJobRevisions(d, { jobId: 1, limit: MAX_REVISION_LIST_LIMIT + 9999 })
+    expect(got).toBe(MAX_REVISION_LIST_LIMIT)
+  })
+  it('ignores a non-positive limit and uses the repo default', () => {
+    let got: number | undefined = -999
+    const d = deps({ listRevisionsForJob: (_jobId, limit) => { got = limit; return [] } })
+    handleJobRevisions(d, { jobId: 1, limit: -5 })
+    expect(got).toBeUndefined()
+  })
+})
+
+describe('handleJobRestoreToScheduler', () => {
+  it('rejects an invalid id at the boundary', () => {
+    const d = deps()
+    expect(() => handleJobRestoreToScheduler(d, {})).toThrow('invalid id')
+    expect(() => handleJobRestoreToScheduler(d, { id: 0 })).toThrow('invalid id')
+  })
+  it('passes the id to the service', async () => {
+    let got = 0
+    const d = deps()
+    d.service.restoreToScheduler = async (id: number) => { got = id; return { ok: true } }
+    await handleJobRestoreToScheduler(d, { id: 4 })
+    expect(got).toBe(4)
   })
 })

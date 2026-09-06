@@ -43,6 +43,13 @@
       "when": 1786405204583,
       "tag": "0005_blue_speedball",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1788670166168,
+      "tag": "0006_dizzy_iron_monger",
+      "breakpoints": true
     }
   ]
 }

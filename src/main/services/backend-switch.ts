@@ -132,9 +132,13 @@ export async function migrateTarget(dsn: string, migrationsPgPath: string): Prom
   }
 }
 
-/** The 4 chronos tables (schema.pg.ts) — copyData's insert order (FK dependency order) doubles as
- *  the order assertTargetEmpty reports a non-empty table in. */
-const CHRONOS_TABLES = ['jobs', 'run_logs', 'notify_settings', 'notify_outbox'] as const
+/** The 5 chronos tables (schema.pg.ts) — copyData's insert order (FK dependency order) doubles as
+ *  the order assertTargetEmpty reports a non-empty table in.
+ *
+ *  Every table in schema.pg.ts MUST be listed here. A table left out is copied nowhere and checked
+ *  nowhere, so switching backend silently drops it — which is exactly what happened to job_revisions
+ *  when it was added (caught in review, never shipped). */
+const CHRONOS_TABLES = ['jobs', 'job_revisions', 'run_logs', 'notify_settings', 'notify_outbox'] as const
 
 /** Thrown by assertTargetEmpty when the target already carries rows in one or more chronos
  *  tables — switchToPostgres treats this as an abort-before-touching-anything error (never a
@@ -175,7 +179,7 @@ export async function assertTargetEmpty(dsn: string, clientFactory: PgClientFact
   }
 }
 
-/** Best-effort wipe of the 4 chronos tables (RESTART IDENTITY resets the serial sequences too, so
+/** Best-effort wipe of the 5 chronos tables (RESTART IDENTITY resets the serial sequences too, so
  *  a subsequent assertTargetEmpty + fresh copyData behaves exactly like a never-touched target).
  *  Used by switchToPostgres's cleanup-on-failure path to undo a partially-applied switch. */
 export async function truncateTarget(dsn: string, clientFactory: PgClientFactory = defaultClientFactory): Promise<void> {
@@ -198,6 +202,7 @@ export async function truncateTarget(dsn: string, clientFactory: PgClientFactory
 
 export interface CopyDataCounts {
   jobs: number
+  jobRevisions: number
   runLogs: number
   notifySettings: number
   notifyOutbox: number
@@ -280,6 +285,19 @@ export async function copyData(
       const jobsInserted = (await tx.select().from(pgSchema.jobs)).length
       if (jobsInserted !== jobRows.length) throw new CopyCountMismatchError('jobs', jobRows.length, jobsInserted)
 
+      // job_revisions — the configuration change log. Copied for the same reason run_logs is: it is
+      // history the user cannot reconstruct from anywhere else, and losing it on a backend switch
+      // would be the very failure this table exists to prevent. FK on jobs, so it follows jobs.
+      const revisionRows = await sqliteDb.select().from(sqliteSchema.jobRevisions)
+      if (revisionRows.length > 0) {
+        await tx.insert(pgSchema.jobRevisions).values(revisionRows as unknown as (typeof pgSchema.jobRevisions.$inferInsert)[])
+        await tx.execute(sql`SELECT setval('job_revisions_id_seq', ${maxRowId(revisionRows)})`)
+      }
+      const revisionsInserted = (await tx.select().from(pgSchema.jobRevisions)).length
+      if (revisionsInserted !== revisionRows.length) {
+        throw new CopyCountMismatchError('job_revisions', revisionRows.length, revisionsInserted)
+      }
+
       // run_logs — full read (no repo-layer limit), NUL-strip stdout/stderr before insert.
       const runLogRows = await sqliteDb.select().from(sqliteSchema.runLogs)
       if (runLogRows.length > 0) {
@@ -317,6 +335,7 @@ export async function copyData(
 
       return {
         jobs: jobRows.length,
+        jobRevisions: revisionRows.length,
         runLogs: runLogRows.length,
         notifySettings: notifySettingsRows.length,
         notifyOutbox: outboxRows.length

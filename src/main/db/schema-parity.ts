@@ -5,8 +5,8 @@
 // assertions fail `tsc` if the inferred Select row types diverge between the dialects — complementing
 // the runtime schema-parity.test.ts (which guards column names / notNull / logical dataType). This
 // file has no runtime output (type-only imports + type aliases erase to nothing).
-import type { Job as SqliteJob, RunLog as SqliteRunLog, NotifySettings as SqliteNotify, NotifyOutbox as SqliteOutbox } from './schema'
-import type { Job as PgJob, RunLog as PgRunLog, NotifySettings as PgNotify, NotifyOutbox as PgOutbox } from './schema.pg'
+import type { Job as SqliteJob, RunLog as SqliteRunLog, NotifySettings as SqliteNotify, NotifyOutbox as SqliteOutbox, JobRevision as SqliteJobRevision } from './schema'
+import type { Job as PgJob, RunLog as PgRunLog, NotifySettings as PgNotify, NotifyOutbox as PgOutbox, JobRevision as PgJobRevision } from './schema.pg'
 
 type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true : false
 type Expect<T extends true> = T
@@ -16,3 +16,4 @@ export type _JobRowParity = Expect<Equal<SqliteJob, PgJob>>
 export type _RunLogRowParity = Expect<Equal<SqliteRunLog, PgRunLog>>
 export type _NotifyRowParity = Expect<Equal<SqliteNotify, PgNotify>>
 export type _OutboxRowParity = Expect<Equal<SqliteOutbox, PgOutbox>>
+export type _JobRevisionRowParity = Expect<Equal<SqliteJobRevision, PgJobRevision>>
